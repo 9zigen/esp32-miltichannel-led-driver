@@ -1,0 +1,12 @@
+
+menu "OTA"
+
+config OTA_URL
+    string "OTA URL"
+	default "http://192.168.4.2:8070/hv_cc_led_driver_rtos.ota.bin"
+	help
+		HTTP Server url to download the image file from.
+
+		See example README.md for details.
+
+endmenu
