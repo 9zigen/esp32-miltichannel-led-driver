@@ -1,0 +1,14 @@
+/backend/node_modules/
+/.vscode/
+/.idea/
+/backend/package-lock.json
+/build/
+/cmake-build-esp12e/
+/frontend/node_modules/
+/frontend/package-lock.json
+/frontend/.editorconfig
+/frontend/.browserslistrc
+/sdkconfig
+/sdkconfig.old
+/data/
+/frontend/dist/

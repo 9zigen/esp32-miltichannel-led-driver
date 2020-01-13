@@ -1,0 +1,16 @@
+menu "LED Controller Configuration"
+
+config CONTROLLER_WIFI_SSID
+    string "AP WiFi SSID"
+    default "LED_CONTROLLER"
+    help
+        SSID (network name) for the example to connect to.
+
+config CONTROLLER_WIFI_PASS
+    string "AP WiFi Password"
+    default "12345678"
+    help
+        WiFi password (WPA or WPA2) for the example to use.
+        Can be left blank if the network has no security set.
+
+endmenu
