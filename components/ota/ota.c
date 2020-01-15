@@ -52,7 +52,7 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 
 void ota_task(void *pvParameter)
 {
-  ESP_LOGI(TAG, "Starting OTA example...");
+  ESP_LOGI(TAG, "Starting OTA ...");
 
   /* Wait for the callback to set the AP_CONNECTED_BIT in the
      event group.

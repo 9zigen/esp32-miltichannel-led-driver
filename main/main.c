@@ -300,15 +300,6 @@ void app_main()
   vTaskDelay(3000 / portTICK_RATE_MS);
   if (!gpio_get_level(GPIO_NUM_0))
   {
-    tcpip_adapter_init();
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK(esp_event_loop_init(event_handler, &server));
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-
-    wifi_init_ap();
-
     xTaskCreate(&ota_task, "ota_task", 8192, NULL, 5, NULL);
     return;
   }
