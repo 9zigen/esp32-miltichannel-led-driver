@@ -332,11 +332,8 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
 
       cJSON * power = cJSON_GetObjectItem(led_item, "power");
       cJSON * state = cJSON_GetObjectItem(led_item, "state");
-      if (cJSON_IsNumber(power) && cJSON_IsNumber(state))
-      {
-        led_config->power = power->valueint;
-        led_config->state = state->valueint;
-      }
+      led_config->power = power->valueint;
+      led_config->state = state->valueint;
     }
 
     char * debug_string = NULL;
