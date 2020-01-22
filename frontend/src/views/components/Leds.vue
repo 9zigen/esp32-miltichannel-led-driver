@@ -54,7 +54,7 @@
                 <div class="field">
                   <div class="control">
                     <input
-                      v-model="led.power"
+                      v-model.number="led.power"
                       class="input"
                       type="text"
                       placeholder="channel power"

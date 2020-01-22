@@ -59,22 +59,20 @@ static void update_system_info()
   }
 
   ESP_LOGI(TAG, "net address: %s", system_status.net_address);
-  ESP_LOGI(TAG, "net mask   : %s", system_status.net_mask);
-  ESP_LOGI(TAG, "net gateway: %s", system_status.net_gateway);
   ESP_LOGI(TAG, "net mac    : %s", system_status.mac);
-
-  /* Free heap */
-  system_status.free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  ESP_LOGI(TAG, "free heap  : %u", system_status.free_heap);
 
   /* Local time */
   print_time();
 
-  /* ToDo Led PWM */
+  /* STM32 ADC: NTC + VCC */
+  ESP_LOGI(TAG, "ntc temp   : %d", get_stm_ntc_temperature());
+  ESP_LOGI(TAG, "mcu temp   : %d", get_stm_mcu_temperature());
+  ESP_LOGI(TAG, "power in   : %u", get_stm_vcc_power());
+  ESP_LOGI(TAG, "mcu status : %u", get_stm_status());
 
-  /* ToDo Led Brightness */
-
-
+  /* Free heap */
+  system_status.free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  ESP_LOGI(TAG, "free heap  : %u", system_status.free_heap);
 }
 
 system_status_t* get_system_status(void)

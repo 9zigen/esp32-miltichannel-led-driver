@@ -39,6 +39,11 @@ app.post('/api/light', function (req, res) {
   res.send(JSON.stringify({success: true}));
 });
 
+/* OTA */
+app.get('/update', function (req, res) {
+  res.send(JSON.stringify({success: true}));
+});
+
 /* Schedule ----> */
 app.get('/api/schedule', function (req, res) {
   res.send(JSON.stringify({schedule:schedule}));
@@ -109,7 +114,8 @@ let services = {
   mqtt_password: '',
   mqtt_qos: 0,
   enable_ntp: false,
-  enable_mqtt: false
+  enable_mqtt: false,
+  ota_url: 'http://192.168.4.2:8080/hv_cc_led_driver_rtos.ota.bin'
 }
 
 let networks = [
@@ -228,7 +234,8 @@ let status = {
   chipId: 1827,
   freeHeap: 23567,
   vcc: 48,
-  temperature: 20,
+  ntc_temperature: 70,
+  board_temperature: 25,
   wifiMode: 'STA',
   ipAddress: '192.168.1.199',
   macAddress: '0A:EE:00:00:01:90',

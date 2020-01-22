@@ -2,6 +2,8 @@
 ** Created by Aleksey Volkov on 22.12.2019.
 ***/
 
+#include "string.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -21,6 +23,8 @@
 //extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 static const char *TAG="OTA";
+
+const char * default_ota_url_ptr = CONFIG_OTA_URL;
 
 esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
@@ -50,7 +54,7 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
   return ESP_OK;
 }
 
-void ota_task(void *pvParameter)
+void ota_task(void *ota_url)
 {
   ESP_LOGI(TAG, "Starting OTA ...");
 
@@ -62,10 +66,16 @@ void ota_task(void *pvParameter)
   ESP_LOGI(TAG, "Connect to Wifi ! Start to Connect to Server....");
 
   esp_http_client_config_t config = {
-      .url = CONFIG_OTA_URL,
+      .url = default_ota_url_ptr,
 //      .cert_pem = (char *)server_cert_pem_start,
       .event_handler = _http_event_handler,
   };
+
+  /* http://192.168.1.2:80/firmware.bin - 34 chars */
+  if (strlen(ota_url) > 34) {
+    config.url = ota_url;
+  }
+
   esp_err_t ret = esp_https_ota(&config);
 
   if (ret == ESP_OK) {

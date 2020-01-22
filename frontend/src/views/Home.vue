@@ -43,8 +43,8 @@
                   <div class="column is-12">
                     <div
                       v-for="(led, index) in status.channels"
-                      v-bind:key="index"
                       v-show="active[index]"
+                      v-bind:key="index"
                       class="field is-horizontal"
                     >
                       <div class="field-body">
@@ -92,8 +92,8 @@
                 <div class="columns is-mobile is-multiline">
                   <div
                     v-for="(led, index) in status.channels"
-                    v-bind:key="index"
                     v-show="active[index]"
+                    v-bind:key="index"
                     class="column is-narrow"
                   >
                     <div
@@ -135,15 +135,25 @@
                       <li>Time: {{ status.localTime }}</li>
                       <li>Uptime: {{ status.upTime }}</li>
                       <li>Power IN: {{ status.vcc }} volt.</li>
-                      <li>Temperature: {{ status.temperature }}</li>
-                      <li>MQTT Server: {{ status.mqttService }}</li>
-                      <li>NTP: {{ status.ntpService }}</li>
+                      <li>NTC Temperature: {{ status.ntc_temperature }}</li>
+                      <li>Board Temperature: {{ status.board_temperature }}</li>
+                      <li>MQTT Server: {{ mqttStatus }}</li>
+                      <li>NTP: {{ ntpStatus }}</li>
                     </ul>
                   </div>
                 </div>
                 <div class="columns">
                   <div class="column has-text-left">
                     <div class="field is-grouped">
+                      <div class="control">
+                        <a
+                          class="button is-light"
+                          @click="updateDevice"
+                        >Update</a>
+                        <p class="help">
+                          New firmware
+                        </p>
+                      </div>
                       <div class="control">
                         <a
                           class="button is-warning"
@@ -189,7 +199,8 @@ export default {
         chipId: 0,
         freeHeap: 0,
         vcc: 0,
-        temperature: 20,
+        ntc_temperature: 20,
+        board_temperature: 20,
         wifiMode: '',
         ipAddress: '',
         macAddress: '00:00:00:00:00:00',
@@ -207,7 +218,14 @@ export default {
   },
   computed: {
     mqttStatus: function () {
-      return this.staus.mqttService.enabled
+      let status = this.status.mqttService.enabled ? 'on' : 'off'
+      status += this.status.mqttService.connected ? ', connected' : ', disconnected'
+      return status
+    },
+    ntpStatus: function () {
+      let status = this.status.ntpService.enabled ? 'on' : 'off'
+      status += this.status.ntpService.sync ? ', sync`d' : ', not sync'
+      return status
     }
   },
   mounted () {
@@ -265,6 +283,14 @@ export default {
       try {
         let response = await http.get('/reboot')
         if (response.data.success) { eventBus.$emit('message', 'Rebooting...', 'success') }
+      } catch (e) {
+        eventBus.$emit('message', e, 'danger')
+      }
+    },
+    async updateDevice () {
+      try {
+        let response = await http.get('/update')
+        if (response.data.success) { eventBus.$emit('message', 'Update Firmware...', 'success') }
       } catch (e) {
         eventBus.$emit('message', e, 'danger')
       }

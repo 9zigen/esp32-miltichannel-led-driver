@@ -9,6 +9,7 @@
 #include "driver/i2c.h"
 
 #define STM_ADDRESS                 0x32    /* STM32 I2C Device address */
+#define STM_STATUS_REG              0x01    /* GET status (iWDG) */
 #define STM_BRIGHTNESS_REG_SET      0x08    /* SET Brightness Write byte (only for restore on unexpected reason) */
 #define STM_BRIGHTNESS_REG_GET      0x09    /* GET Brightness Read byte (only for restore on unexpected reason) */
 #define STM_PWM_REG_SET_ALL         0x10    /* SET All PWM Channels: order CH1-CH2---CH8 Write 8x byte */
@@ -69,16 +70,19 @@ void set_stm_brightness(uint8_t *brightness);
 void get_stm_brightness(uint8_t *brightness);
 
 /* get ntc temperature in celsius */
-uint16_t get_stm_ntc_temperature(void);
+int16_t get_stm_ntc_temperature(void);
 
 /* get mcu internal temperature in celsius */
-uint16_t get_stm_mcu_temperature(void);
+int16_t get_stm_mcu_temperature(void);
 
 /* get Power In in millivolts */
 uint16_t get_stm_vcc_power();
 
 /* get RTC battery in millivolts */
 uint16_t get_stm_vbat();
+
+/* get stm status */
+uint8_t get_stm_status(void);
 
 uint16_t stm_read_reg16(uint8_t reg);
 esp_err_t HAL_I2C_Write(i2c_port_t i2c_port, uint8_t address, uint8_t reg, uint8_t *data, size_t length);

@@ -103,7 +103,7 @@ void set_brightness(uint8_t new_brightness)
     txMessage.target_duty[i] = _channel[i].current_duty;
   }
 
-  /* transition duration steps_left * step duration; 50 * 10ms = 500ms */
+  /* transition duration steps_left * step duration; 50 * 10ms = 2500ms */
   txMessage.steps_left = 50;
   txMessage.target_brightness = new_brightness;
 
@@ -131,27 +131,31 @@ void set_light(const uint8_t * target_duty, uint8_t target_brightness)
 
 static void restore_last_pwm()
 {
-  uint8_t stm_channels[MAX_LED_CHANNELS];
-  uint8_t target_duty[MAX_LED_CHANNELS];
+  uint8_t stm_channels[MAX_LED_CHANNELS] = {0};
+  uint8_t target_duty[MAX_LED_CHANNELS] = {0};;
 
   /* restore brightness */
   uint8_t new_brightness = 0;
   get_stm_brightness(&new_brightness);
-  ESP_LOGD(TAG, "get_stm_brightness: %u", new_brightness);
+  ESP_LOGI(TAG, "get_stm_brightness: %u", new_brightness);
 
   /* get all pwm channels from stm in array */
   get_stm_pwm((uint8_t *)&stm_channels);
 
   for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
-    double current_duty = (stm_channels[i] + 0.0) / (new_brightness / 100.0);
-    target_duty[i] = (uint8_t)(current_duty + 0.5);
+    if (new_brightness > 0)
+    {
+      double current_duty = (stm_channels[i] + 0.0) / (new_brightness / 100.0);
+      target_duty[i] = (uint8_t)(current_duty + 0.5);
+    }
 
-    ESP_LOGD(TAG, "stm_channels: %u %u", i, stm_channels[i]);
-    ESP_LOGD(TAG, "current_duty: %f", _channel[i].current_duty);
+    ESP_LOGI(TAG, "stm_channels: %u %u", i, stm_channels[i]);
+    ESP_LOGI(TAG, "current_duty: %f", _channel[i].current_duty);
+    ESP_LOGI(TAG, "target_duty : %d", target_duty[i]);
   }
 
   /* restore light */
-  set_light((uint8_t*)&target_duty, new_brightness);
+  set_light(target_duty, new_brightness);
 }
 
 /* main light control task */

@@ -13,4 +13,6 @@ extern EventGroupHandle_t wifi_event_group;
 extern const int CONNECTED_BIT;
 extern const int AP_CONNECTED_BIT;
 
+esp_err_t upgrade_firmware();
+
 #endif //HV_CC_LED_DRIVER_RTOS_MAIN_H

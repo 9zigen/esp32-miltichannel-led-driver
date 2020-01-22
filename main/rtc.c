@@ -34,7 +34,7 @@ static void initialize_sntp(services_t * config)
 
 static void obtain_time(void)
 {
-  xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+  xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, 1000 * 30 / portTICK_RATE_MS);
 
   services_t * services = get_service_config();
 
@@ -95,26 +95,38 @@ void init_clock()
 
   // Is time set? If not, tm_year will be (1970 - 1900).
   if (timeinfo.tm_year < (2020 - 1900)) {
-    ESP_LOGI(TAG, "Time is not set yet. Connecting to WiFi and getting time over NTP.");
+    ESP_LOGI(TAG, "Time is not set yet.");
+  }
+
+  if (services->enable_ntp)
+  {
+    ESP_LOGI(TAG, "Connecting to WiFi and getting time over NTP.");
     obtain_time();
 
-    time(&now);
-    localtime_r(&now, &timeinfo);
+    if (ntp_sync)
+    {
+      time(&now);
+      localtime_r(&now, &timeinfo);
 
-    /* Print Local Time esp8266 */
-    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    ESP_LOGI(TAG, "The NTP date/time is: %s", strftime_buf);
+      /* Print Local Time esp8266 */
+      strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+      ESP_LOGI(TAG, "The NTP date/time is: %s", strftime_buf);
 
-    /* set STM time in local time */
-    datetime.year = 1900 + timeinfo.tm_year - 2000; /* only 2 last dig in STM RTC */
-    datetime.month = timeinfo.tm_mon + 1;           /* 0 - Jan */
-    datetime.day = timeinfo.tm_mday;
-    datetime.weekday = timeinfo.tm_wday;
-    datetime.hour = timeinfo.tm_hour;
-    datetime.minute = timeinfo.tm_min;
-    datetime.second = timeinfo.tm_sec;
+      /* set STM time in local time */
+      datetime.year = 1900 + timeinfo.tm_year - 2000; /* only 2 last dig in STM RTC */
+      datetime.month = timeinfo.tm_mon + 1;           /* 0 - Jan */
+      datetime.day = timeinfo.tm_mday;
+      datetime.weekday = timeinfo.tm_wday;
+      datetime.hour = timeinfo.tm_hour;
+      datetime.minute = timeinfo.tm_min;
+      datetime.second = timeinfo.tm_sec;
 
-    set_stm_rtc(&datetime);
+      set_stm_rtc(&datetime);
+    }
+  }
+  else
+  {
+    ESP_LOGI(TAG, "NTP Disabled. Will use time from stm32 rtc.");
   }
 
   /* Set timezone from config */
@@ -136,41 +148,6 @@ void init_clock()
   strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
   ESP_LOGI(TAG, "The Local esp8266 date/time is: %s", strftime_buf);
 
-}
-
-/* Convert from epoch to human-readable date */
-int convert_time_from_epoch(void)
-{
-  time_t     now;
-  struct tm  ts;
-  char       buf[80];
-
-  // Get current time
-  time(&now);
-
-  // Format time, "ddd yyyy-mm-dd hh:mm:ss zzz"
-  ts = *localtime(&now);
-  strftime(buf, sizeof(buf), "%a %Y-%m-%d %H:%M:%S %Z", &ts);
-  printf("%s\n", buf);
-  return 0;
-}
-
-/* Convert from human-readable date to epoch */
-void convert_time_to_epoch(void)
-{
-  struct tm t;
-  time_t t_of_day;
-
-  t.tm_year = 2019-1900;  // Year - 1900
-  t.tm_mon = 7;           // Month, where 0 = jan
-  t.tm_mday = 8;          // Day of the month
-  t.tm_hour = 16;
-  t.tm_min = 11;
-  t.tm_sec = 42;
-  t.tm_isdst = -1;        // Is DST on? 1 = yes, 0 = no, -1 = unknown
-  t_of_day = mktime(&t);
-
-  printf("seconds since the Epoch: %ld\n", (long) t_of_day);
 }
 
 void print_time()

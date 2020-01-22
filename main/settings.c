@@ -212,11 +212,14 @@ void set_default_service()
   sprintf(hostname_buf, "LED_%d", esp_random());
   strlcpy(service.hostname, hostname_buf, 20);
 
+  /* OTA */
+  strlcpy(service.ota_url, CONFIG_OTA_URL, 64);
+
   /* NTP */
   strlcpy(service.ntp_server, "es.pool.ntp.org", 20);
   service.utc_offset = 1;
   service.ntp_dst = false;
-  service.enable_ntp = true;
+  service.enable_ntp = false;
 
   /*MQTT */
   strlcpy(service.mqtt_user, empty_str, 16);

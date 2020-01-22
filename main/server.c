@@ -11,6 +11,8 @@
 #include <rtc.h>
 #include <mqtt.h>
 #include <esp_timer.h>
+#include <ota.h>
+#include <main.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -98,6 +100,16 @@ esp_err_t factory_get_handler(httpd_req_t *req)
   /* Erase NVS partition */
   erase_settings();
   esp_restart();
+}
+
+/* OTA GET handler */
+esp_err_t ota_get_handler(httpd_req_t *req)
+{
+  char * response = success_response_json();
+  httpd_resp_send(req, response, strlen(response));
+
+  /* Start ota task */
+  return upgrade_firmware();
 }
 
 /* STATUS GET */
@@ -204,7 +216,7 @@ static esp_err_t light_post_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "light_post_handler new brightness %d", brightness->valueint);
   }
 
-  set_light((uint8_t*)&target_duty, target_brightness);
+  set_light(target_duty, target_brightness);
 
   cJSON_Delete(root);
 
@@ -426,6 +438,11 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
       strlcpy(service_config->hostname, hostname->valuestring, 20);
     }
 
+    cJSON *ota_url = cJSON_GetObjectItem(services, "ota_url");
+    if (cJSON_IsString(ota_url) && (ota_url->valuestring != NULL)) {
+      strlcpy(service_config->ota_url, ota_url->valuestring, 64);
+    }
+
     cJSON *ntp_server = cJSON_GetObjectItem(services, "ntp_server");
     if (cJSON_IsString(ntp_server) && (hostname->valuestring != NULL)) {
       strlcpy(service_config->ntp_server, ntp_server->valuestring, 20);
@@ -582,6 +599,13 @@ httpd_handle_t start_webserver(void)
         .user_ctx = NULL
     };
 
+    httpd_uri_t get_ota = {
+        .uri      = "/update",
+        .method   = HTTP_GET,
+        .handler  = ota_get_handler,
+        .user_ctx = NULL
+    };
+
     /* Send current device status */
     httpd_uri_t get_status = {
         .uri      = "/status",
@@ -633,6 +657,7 @@ httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &global_options);
     httpd_register_uri_handler(server, &get_reboot);
     httpd_register_uri_handler(server, &get_factory);
+    httpd_register_uri_handler(server, &get_ota);
     httpd_register_uri_handler(server, &get_home);
     httpd_register_uri_handler(server, &get_status);
     httpd_register_uri_handler(server, &post_light);
@@ -652,6 +677,7 @@ httpd_handle_t start_webserver(void)
 void stop_webserver(httpd_handle_t server)
 {
   httpd_stop(server);
+  server = NULL;
 }
 
 /* JSON -------------------------------------- */
@@ -691,7 +717,8 @@ char * get_status_json()
   cJSON_AddItemToObject(status, "chipId", cJSON_CreateNumber(system_status->revision));
   cJSON_AddItemToObject(status, "freeHeap", cJSON_CreateNumber(system_status->free_heap));
   cJSON_AddItemToObject(status, "vcc", cJSON_CreateNumber(get_stm_vcc_power()));
-  cJSON_AddItemToObject(status, "temperature", cJSON_CreateNumber(get_stm_ntc_temperature()));
+  cJSON_AddItemToObject(status, "ntc_temperature", cJSON_CreateNumber(get_stm_ntc_temperature()));
+  cJSON_AddItemToObject(status, "board_temperature", cJSON_CreateNumber(get_stm_mcu_temperature()));
   cJSON_AddItemToObject(status, "wifiMode", cJSON_CreateString(system_status->wifi_mode));
   cJSON_AddItemToObject(status, "ipAddress", cJSON_CreateString(system_status->net_address));
   cJSON_AddItemToObject(status, "macAddress", cJSON_CreateString(system_status->mac));
@@ -900,6 +927,7 @@ char * get_settings_json()
   cJSON * services = cJSON_CreateObject();
   services_t * service_config = get_service_config();
   cJSON_AddItemToObject(services, "hostname", cJSON_CreateString(service_config->hostname));
+  cJSON_AddItemToObject(services, "ota_url", cJSON_CreateString(service_config->ota_url));
   cJSON_AddItemToObject(services, "ntp_server", cJSON_CreateString(service_config->ntp_server));
   cJSON_AddItemToObject(services, "utc_offset", cJSON_CreateNumber(service_config->utc_offset));
   cJSON_AddItemToObject(services, "ntp_dst", cJSON_CreateBool(service_config->ntp_dst));

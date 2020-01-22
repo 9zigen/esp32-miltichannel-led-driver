@@ -20,6 +20,37 @@
             </div>
           </div>
         </div>
+
+        <div class="field is-horizontal">
+          <div class="field-label is-normal">
+            <label class="label">OTA url</label>
+          </div>
+          <div class="field-body">
+            <div class="field">
+              <div class="control">
+                <input
+                  v-model="services.ota_url"
+                  class="input"
+                  type="text"
+                  placeholder="OTA Url"
+                >
+              </div>
+            </div>
+            <div class="field">
+              <div class="control">
+                <span
+                  class="button is-outlined"
+                  @click="updateDevice"
+                >
+                  <check-icon
+                    size="1.5x"
+                    class="custom-class"
+                  /> Apply
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- NTP -->
@@ -68,12 +99,12 @@
               <div class="control">
                 <div class="select">
                   <select
-                      v-model.number="services.utc_offset"
+                    v-model.number="services.utc_offset"
                   >
                     <option
-                        v-for="(option, index) in tzOptions"
-                        v-bind:key="index"
-                        v-bind:value="option.value"
+                      v-for="(option, index) in tzOptions"
+                      v-bind:key="index"
+                      v-bind:value="option.value"
                     >
                       {{ option.text }}
                     </option>
@@ -225,6 +256,7 @@ export default {
     return {
       services: {
         hostname: '',
+        ota_url: 'http://192.168.4.2:8080',
         ntp_server: '',
         utc_offset: 0,
         ntp_dst: true,
@@ -286,6 +318,14 @@ export default {
     async loadServices () {
       let response = await http.get('/api/settings')
       this.services = response.data.services
+    },
+    async updateDevice () {
+      try {
+        let response = await http.get('/update')
+        if (response.data.success) { eventBus.$emit('message', 'Update Firmware...', 'success') }
+      } catch (e) {
+        eventBus.$emit('message', e, 'danger')
+      }
     }
   }
 }

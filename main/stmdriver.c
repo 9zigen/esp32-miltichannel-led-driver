@@ -19,17 +19,19 @@ void init_stm()
   ESP_LOGI(TAG, "[APP] free memory before start stm driver %d bytes", esp_get_free_heap_size());
 
   /* BOOT0 */
-  gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_12, 0);
+//  gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT);
+//  gpio_set_level(GPIO_NUM_12, 0);
 
   /* RESET */
-  gpio_set_direction(GPIO_NUM_13, GPIO_MODE_OUTPUT);
-  gpio_set_level(GPIO_NUM_13, 1);
-  vTaskDelay(100);
-  gpio_set_level(GPIO_NUM_13, 0);
-  vTaskDelay(10);
+//  gpio_set_direction(GPIO_NUM_13, GPIO_MODE_OUTPUT);
+//  gpio_set_level(GPIO_NUM_13, 1);
+//  vTaskDelay(100);
+//  gpio_set_level(GPIO_NUM_13, 0);
+//  vTaskDelay(10);
 
   i2c_master_init();
+
+  task_i2cscanner();
 }
 
 /**
@@ -45,7 +47,7 @@ void i2c_master_init()
   conf.scl_io_num = STM32_SCL;
   conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
   conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-  conf.clk_stretch_tick = 0; // 300 ticks, Clock stretch is about 210us, you can make changes according to the actual situation.
+  //conf.clk_stretch_tick = 0; // 300 ticks, Clock stretch is about 210us, you can make changes according to the actual situation.
 
   ESP_ERROR_CHECK(i2c_driver_install(i2c_master_port, conf.mode));
   ESP_ERROR_CHECK(i2c_param_config(i2c_master_port, &conf));
@@ -69,7 +71,6 @@ void get_stm_rtc(stm_datetime_t *date_time)
   date_time->minute = rx_data[5];
   date_time->second = rx_data[6];
 
-  /* bug? */
   if (date_time->month == 0) {
     date_time->month = 1;
   }
@@ -113,17 +114,17 @@ void set_stm_brightness(uint8_t * brightness)
 
 void get_stm_brightness(uint8_t * brightness)
 {
-  HAL_I2C_Read(I2C_NUM_0, STM_ADDRESS, STM_BRIGHTNESS_REG_GET, brightness, 1);
+  stm_read_reg8(STM_BRIGHTNESS_REG_GET, brightness);
 }
 
-uint16_t get_stm_ntc_temperature()
+int16_t get_stm_ntc_temperature()
 {
-  return stm_read_reg16(STM_TEMP_REG_NTC);
+  return stm_read_reg16(STM_TEMP_REG_NTC) - 255;
 }
 
-uint16_t get_stm_mcu_temperature()
+int16_t get_stm_mcu_temperature()
 {
-  return stm_read_reg16(STM_TEMP_REG_MCU);
+  return stm_read_reg16(STM_TEMP_REG_MCU) - 255;
 }
 
 uint16_t get_stm_vcc_power()
@@ -134,6 +135,13 @@ uint16_t get_stm_vcc_power()
 uint16_t get_stm_vbat()
 {
   return stm_read_reg16(STM_VBAT_REG);
+}
+
+uint8_t get_stm_status()
+{
+  uint8_t status;
+  stm_read_reg8(STM_STATUS_REG, &status);
+  return status;
 }
 
 void stm_read_reg8(uint8_t reg, uint8_t * value)
@@ -150,7 +158,6 @@ uint16_t stm_read_reg16(uint8_t reg)
 {
   uint8_t rxData[2] = {0};
   HAL_I2C_Read(I2C_NUM_0, STM_ADDRESS, reg, rxData, 2);
-
   return (uint16_t) (rxData[0] << 8 | rxData[1]);
 }
 
@@ -217,5 +224,5 @@ void task_i2cscanner() {
     i2c_cmd_link_delete(cmd);
   }
   printf("\n");
-  vTaskDelete(NULL);
+  //vTaskDelete(NULL);
 }
