@@ -3,7 +3,7 @@
 /.idea/
 /backend/package-lock.json
 /build/
-/cmake-build-esp12e/
+/cmake-build-*
 /frontend/node_modules/
 /frontend/package-lock.json
 /frontend/.editorconfig
@@ -12,3 +12,4 @@
 /sdkconfig.old
 /data/
 /frontend/dist/
+/certs/

@@ -16,15 +16,17 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-#include "include/ota.h"
-#include "../../main/include/main.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
 
-//extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-//extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+#include "include/ota.h"
+#include "../../main/include/connect.h"
 
 static const char *TAG="OTA";
 
 const char * default_ota_url_ptr = CONFIG_OTA_URL;
+extern const uint8_t server_cert_pem_start[] asm("_binary_fw_alab_cc_pem_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_fw_alab_cc_pem_end");
 
 esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
@@ -61,18 +63,27 @@ void ota_task(void *ota_url)
   /* Wait for the callback to set the AP_CONNECTED_BIT in the
      event group.
   */
-  xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT,
+  xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT,
                       false, true, portMAX_DELAY);
   ESP_LOGI(TAG, "Connect to Wifi ! Start to Connect to Server....");
 
+  /* Custom CA bundle */
+//  esp_tls_cfg_t cfg = {
+//      .crt_bundle_attach = esp_crt_bundle_attach,
+//  };
+
+//  esp_crt_bundle_attach(NULL);
+
+//  esp_tls_init_global_ca_store();
   esp_http_client_config_t config = {
       .url = default_ota_url_ptr,
 //      .cert_pem = (char *)server_cert_pem_start,
       .event_handler = _http_event_handler,
+//      .use_global_ca_store = true
   };
 
-  /* http://192.168.1.2:80/firmware.bin - 34 chars */
-  if (strlen(ota_url) > 34) {
+  /* ex: http://192.168.1.2:80/firmware.bin */
+  if (strlen(ota_url)) {
     config.url = ota_url;
   }
 
@@ -87,5 +98,6 @@ void ota_task(void *ota_url)
   /* exit OTA */
   ESP_LOGI(TAG, "Firmware Upgrades EXIT!");
 
+  free(ota_url);
   vTaskDelete(NULL);
 }

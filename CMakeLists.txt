@@ -2,4 +2,6 @@
 # in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.5)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(HV_CC_LED_DRIVER_RTOS)
+project(ESP32_CC_LED_DRIVER_RTOS)
+
+set($ENV{IDF_TARGET} "esp32")
