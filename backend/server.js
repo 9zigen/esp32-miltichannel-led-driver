@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const app = express();
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const fileupload = require("express-fileupload");
 
 //initialize a simple http server
 const server = http.createServer(app);
@@ -22,6 +23,32 @@ app.options('*', cors()); // include before other routes
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
+app.use(fileupload());
+
+/* auth */
+verifyToken = (req, res, next) => {
+  let token = req.headers["authorization"];
+  if (!token || token === 'undefined') {
+    return res.status(401).send({
+            message: "Unauthorized!"
+          });
+    // return res.status(403).send({
+    //   message: "No token provided!"
+    // });
+  }
+};
+
+/* Control channels */
+app.post('/auth', function (req, res) {
+  // res.status(401).send({
+  //   message: "Unauthorized!"
+  // });
+  res.send(JSON.stringify({
+    success: true,
+    token: 'dsfsdfsdfs'
+  }));
+});
+
 /* Home page */
 app.get('/', function (req, res) {
   res.send('Hello World');
@@ -29,7 +56,14 @@ app.get('/', function (req, res) {
 
 /* On-lne Status */
 app.get('/status', function (req, res) {
-  res.send(JSON.stringify({status: status}));
+  let token = req.headers["authorization"];
+  if (!token || token === 'undefined') {
+    return res.status(401).send({
+      message: "Unauthorized!"
+    });
+  } else {
+    res.send(JSON.stringify({status: status}));
+  }
 });
 
 /* Control channels */
@@ -41,6 +75,14 @@ app.post('/api/light', function (req, res) {
 
 /* OTA */
 app.get('/update', function (req, res) {
+  res.status(401).send({
+    message: "Unauthorized!"
+  });
+  res.send(JSON.stringify({success: true}));
+});
+
+app.post('/upload', function (req, res) {
+  console.log(req.files);
   res.send(JSON.stringify({success: true}));
 });
 
@@ -61,7 +103,11 @@ app.get('/api/settings', function (req, res) {
     leds: leds,
     networks: networks,
     services: services,
-    time: time
+    thingsboard: thingsboard,
+    schedule_config: scheduleConfig,
+    time: time,
+    cooling: cooling,
+    auth: auth
   }));
 });
 
@@ -76,8 +122,20 @@ app.post('/api/settings', function (req, res) {
   if  (req.body.services) {
     services = req.body.services
   }
+  if  (req.body.thingsboard) {
+    thingsboard = req.body.thingsboard
+  }
+  if (req.body.schedule_config) {
+    scheduleConfig = req.body.schedule_config
+  }
   if (req.body.time) {
     time = req.body.time
+  }
+  if (req.body.cooling) {
+    cooling = req.body.cooling
+  }
+  if (req.body.auth) {
+    auth = req.body.auth
   }
 
   res.send(JSON.stringify({success: true}));
@@ -118,6 +176,33 @@ let services = {
   ota_url: 'http://192.168.4.2:8080/hv_cc_led_driver_rtos.ota.bin'
 }
 
+let cooling = {
+  installed: true,
+  start_temp: 45,
+  target_temp: 50,
+  max_temp: 70,
+  tachometer: 1290,
+  pid_kp: 10, /* proportional gain x100 value */
+  pid_ki: 10, /* integral gain x100 value */
+  pid_kd: 10, /* derivative gain x100 value */
+  pid_max: 10, /* maximum value of manipulated variable */
+  pid_min: 10 /* minimum value of manipulated variable */
+}
+
+let auth = {
+  user: 'admin',
+  password: '12345678'
+}
+
+let thingsboard = {
+  token: '',
+  endpoint: '',
+  qos: 0,
+  retain: false,
+  enable: false,
+  rpc: false
+}
+
 let networks = [
   {
     id: 0,
@@ -144,53 +229,76 @@ let networks = [
 let leds = [
   {
     id: 0,
-    color: '#DDEFFF',
+    color: '#FB647A',
+    duty_max: 255,
     power: 50,
     state: 1
   },
   {
     id: 1,
-    color: '#DDEFFF',
+    color: '#6EB96E',
+    duty_max: 255,
     power: 30,
     state: 1
   },
   {
     id: 2,
-    color: '#DDEFFF',
+    color: '#42B8F3',
+    duty_max: 255,
     power: 40,
     state: 1
   },
   {
     id: 3,
-    color: '#DDEFFF',
+    color: '#b4d9f1',
+    duty_max: 255,
     power: 40,
     state: 1
   },
   {
     id: 4,
-    color: '#DDEFFF',
+    color: '#b4d9f1',
+    duty_max: 255,
     power: 40,
     state: 1
   },
   {
     id: 5,
-    color: '#DDEFFF',
+    color: '#b4d9f1',
+    duty_max: 255,
     power: 40,
     state: 1
   },
   {
     id: 6,
-    color: '#DDEFFF',
+    color: '#b4d9f1',
+    duty_max: 255,
     power: 40,
     state: 1
   },
   {
     id: 7,
-    color: '#DDEFFF',
+    color: '#b4d9f1',
+    duty_max: 255,
     power: 0,
     state: 1
   }
 ];
+
+let scheduleConfig = {
+  mode: 0, /* 0 -> simple sunrise/sunset; 1 -> multiple points */
+  rgb: true,
+  duty_range_points: 255, /* 0 - 255 */
+  sunrise_hour: 10,
+  sunrise_minute: 0,
+  sunset_hour: 22,
+  sunset_minute: 0,
+  brightness: 100,
+  gamma: 100,
+  duty: [
+    10, 20, 10, 20, 20, 4, 10, 0
+  ]
+}
 
 let schedule = [
   {
@@ -204,9 +312,9 @@ let schedule = [
   {
     time_hour: 12,
     time_minute: 0,
-    brightness: 100,
+    brightness: 255,
     duty: [
-      40, 20, 10, 20, 20, 4, 10, 0
+      40, 20, 10, 20, 255, 4, 10, 0
     ]
   },
   {
@@ -231,7 +339,6 @@ let schedule = [
 let status = {
   upTime: '1 day',
   localTime: '12:22',
-  chipId: 1827,
   freeHeap: 23567,
   vcc: 48,
   ntc_temperature: 70,
@@ -242,7 +349,8 @@ let status = {
   mqttService: { "enabled": false, "connected": false },
   ntpService: { "enabled": true, "sync": true },
   brightness: 90,
-  channels: [50, 100, 100, 20, 20, 0, 10, 5]
+  channels: [50, 255, 100, 20, 20, 0, 10, 5],
+  firmware: "1.1"
 };
 
 let time = {
