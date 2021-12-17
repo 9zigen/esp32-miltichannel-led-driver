@@ -3,9 +3,9 @@
     <label class="range-slider__label-min">{{ min }}</label>
     <input
       class="range-slider__range"
-      step="1"
       v-bind:min="min"
       v-bind:max="max"
+      v-bind:step="step"
       type="range"
       v-bind:value="value"
       v-bind:style="styling"
@@ -46,6 +46,10 @@ export default {
     max: {
       type: String,
       default: () => '100'
+    },
+    step: {
+      type: String,
+      default: () => '1'
     },
     color: {
       type: String,
@@ -113,6 +117,7 @@ export default {
       border-radius: 50%;
       background: $range-handle-color;
       cursor: pointer;
+      box-shadow: black 1px 1px 5px;
       transition: background .15s ease-in-out;
 
       &:hover {
@@ -155,7 +160,8 @@ export default {
   .range-slider__label-min, .range-slider__label-max {
     position: absolute;
     top: -15px;
-    color: $shade-10;
+    color: #999;
+    font-size: 0.9rem;
   }
 
   .range-slider__label-max {

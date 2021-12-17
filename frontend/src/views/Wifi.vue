@@ -1,11 +1,14 @@
 <template>
-  <div class="container">
+  <div class="container m-top-touch-navbar">
     <div class="columns is-marginless">
       <div class="column">
         <div class="content has-text-left">
           <h1 class="title">
             WiFi Settings
           </h1>
+          <p class="subtitle is-small">
+            You can add 2 networks.
+          </p>
         </div>
       </div>
     </div>
@@ -18,15 +21,15 @@
           appear
         >
           <div
-            v-for="network in networks"
-            v-bind:key="network.id"
+            v-for="(network, index) in networks"
+            v-bind:key="index"
             class="columns"
           >
             <div class="column">
               <div class="notification bg-notification is-light">
                 <div class="field is-horizontal">
                   <div class="field-label is-normal">
-                    <label class="label">SSID #{{ network.id + 1 }}</label>
+                    <label class="label">SSID #{{ index }}</label>
                   </div>
                   <div class="field-body">
                     <div class="field">
@@ -66,11 +69,11 @@
                         DHCP
                       </p>
                     </div>
-                    <div class="field">
+                    <div class="field is-hidden-mobile">
                       <div class="control has-text-centered">
                         <span
                           class="button is-danger is-flex-mobile"
-                          @click="deleteNetwork(network.id)"
+                          @click="deleteNetwork(index)"
                         >
                           <x-icon size="1.5x" /> Delete
                         </span>
@@ -90,6 +93,7 @@
                           <label class="label">Network:</label>
                         </div>
                         <div class="field-body">
+                          <!-- IP Address -->
                           <div class="field">
                             <div class="control">
                               <input-ip
@@ -101,17 +105,7 @@
                               IP address
                             </p>
                           </div>
-                          <div class="field">
-                            <div class="control">
-                              <input-ip
-                                v-model="network.gateway"
-                                placeholder="192.168.1.1"
-                              />
-                            </div>
-                            <p class="help">
-                              Gateway
-                            </p>
-                          </div>
+                          <!-- Mask -->
                           <div class="field">
                             <div class="control">
                               <input-ip
@@ -123,6 +117,24 @@
                               Mask
                             </p>
                           </div>
+                        </div>
+                      </div>
+                      <div class="field is-horizontal">
+                        <div class="field-label" />
+                        <div class="field-body">
+                          <!-- Gateway -->
+                          <div class="field">
+                            <div class="control">
+                              <input-ip
+                                v-model="network.gateway"
+                                placeholder="192.168.1.1"
+                              />
+                            </div>
+                            <p class="help">
+                              Gateway
+                            </p>
+                          </div>
+                          <!-- DNS -->
                           <div class="field">
                             <div class="control">
                               <input-ip
@@ -139,6 +151,17 @@
                     </div>
                   </div>
                 </transition>
+
+                <div class="field is-hidden-tablet">
+                  <div class="control has-text-centered">
+                    <span
+                      class="button is-danger is-flex-mobile"
+                      @click="deleteNetwork(index)"
+                    >
+                      <x-icon size="1.5x" /> Delete
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -171,7 +194,6 @@ export default {
   data () {
     return {
       networks: [],
-      nextNetworkId: 0,
       capacity: 2
     }
   },
@@ -182,7 +204,6 @@ export default {
     addNetwork () {
       if (this.networks.length < this.capacity) {
         this.networks.push({
-          id: this.nextNetworkId,
           ssid: '',
           password: '',
           ip_address: '192.168.1.100',
@@ -191,7 +212,6 @@ export default {
           dns: '192.168.1.1',
           dhcp: true
         })
-        this.nextNetworkId++
       } else {
         /* error - MAX Networks reached */
         eventBus.$emit('message', 'MAX Networks reached', 'danger')
@@ -199,22 +219,37 @@ export default {
     },
     deleteNetwork (id) {
       this.networks.splice(id, 1)
-      if (this.nextNetworkId > 0) {
-        this.nextNetworkId--
-      }
     },
     async saveNetwork () {
-      let response = await http.post('/api/settings', { networks: this.networks })
-      if (response.data.success) {
-        eventBus.$emit('message', 'Saved', 'success')
-      } else {
-        eventBus.$emit('message', 'NOT Saved', 'danger')
+      try {
+        let response = await http.post('/api/settings', { networks: this.networks })
+        if (response.data.success) {
+          eventBus.$emit('message', 'Saved', 'success')
+          setTimeout(() => {
+            if (confirm('Reboot Led Controller to Reconnect WiFi?')) {
+              this.rebootDevice()
+            }
+          }, 3000)
+        }
+      } catch (e) {
+        if (e.response) {
+          eventBus.$emit('message', e.response.data.message, 'danger')
+        } else {
+          eventBus.$emit('message', 'unexpected error', 'danger')
+        }
       }
     },
     async loadNetwork () {
       let response = await http.get('/api/settings')
       this.networks = response.data.networks
-      this.nextNetworkId = this.networks.length
+    },
+    async rebootDevice () {
+      try {
+        let response = await http.get('/reboot')
+        if (response.data.success) { eventBus.$emit('message', 'Rebooting...', 'success') }
+      } catch (e) {
+        eventBus.$emit('message', e, 'danger')
+      }
     }
   }
 }

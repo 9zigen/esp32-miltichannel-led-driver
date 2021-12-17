@@ -1,5 +1,5 @@
 <template>
-  <div class="container">
+  <div class="container m-top-touch-navbar">
     <!-- Page Title -->
     <div class="tile is-ancestor is-marginless">
       <div class="tile is-parent">
@@ -19,9 +19,9 @@
           <div class="tile is-vertical">
             <!-- Schedule chart -->
             <div class="tile is-parent">
-              <article class="tile is-child notification bg-notification is-light">
+              <article class="tile is-child box">
                 <div class="content">
-                  <p class="title">
+                  <p class="subtitle is-4">
                     Light Schedule
                   </p>
                   <div class="content">
@@ -35,8 +35,8 @@
           <div class="tile is-vertical">
             <!-- Light toggle -->
             <div class="tile is-parent">
-              <article class="tile is-child notification bg-notification is-warning">
-                <p class="title">
+              <article class="tile is-child box has-background-warning">
+                <p class="subtitle is-4">
                   Light Channel control
                 </p>
                 <div class="columns is-vcentered">
@@ -53,7 +53,7 @@
                             <slider
                               v-model.number="status.channels[index]"
                               min="0"
-                              max="100"
+                              max="255"
                               v-bind:color="sliderColor(index)"
                               @change="setLight"
                             />
@@ -82,28 +82,22 @@
             </div>
             <!-- Light Channel status -->
             <div class="tile is-parent">
-              <article class="tile is-child notification bg-notification is-light">
-                <p class="title">
-                  Light Status
-                </p>
-                <p class="subtitle">
+              <article class="tile is-child box">
+                <p class="subtitle is-4">
                   Channels Power
                 </p>
-                <div class="columns is-mobile is-multiline">
-                  <div
+                <div class="tags are-medium">
+                  <span
                     v-for="(led, index) in status.channels"
                     v-show="active[index]"
                     v-bind:key="index"
-                    class="column is-narrow"
+                    v-bind:style="{borderColor: sliderColor(index)}"
+                    class="tag"
                   >
-                    <div
-                      class="notification is-light is-medium"
-                      v-bind:style="{backgroundColor: sliderColor(index)}"
-                    >
-                      #{{ index + 1 }} <br> {{ ledPower(index) }}
-                    </div>
-                  </div>
+                    {{ ledPower(index) }}
+                  </span>
                 </div>
+                <p><strong>Total: aprox. {{ totalPower() }} Watts</strong></p>
               </article>
             </div>
           </div>
@@ -123,7 +117,8 @@
                 <div class="columns">
                   <div class="column has-text-left">
                     <ul>
-                      <li>Chip ID: {{ status.chipId }}</li>
+                      <li>Firmware: {{ status.firmware }}</li>
+                      <li>Hardware: {{ status.hardware }}</li>
                       <li>Free Heap: {{ status.freeHeap }}</li>
                       <li>WIFI: {{ status.wifiMode }}</li>
                       <li>IP Address: {{ status.ipAddress }}</li>
@@ -134,24 +129,24 @@
                     <ul>
                       <li>Time: {{ status.localTime }}</li>
                       <li>Uptime: {{ status.upTime }}</li>
-                      <li>Power IN: {{ status.vcc }} volt.</li>
-                      <li>NTC Temperature: {{ status.ntc_temperature }}</li>
-                      <li>Board Temperature: {{ status.board_temperature }}</li>
+                      <li>Power IN: {{ status.vcc / 1000 }} volt.</li>
+                      <li>NTC Temperature: {{ status.ntc_temperature }} °C</li>
+                      <li>Board Temperature: {{ status.board_temperature / 100 }} °C</li>
                       <li>MQTT Server: {{ mqttStatus }}</li>
                       <li>NTP: {{ ntpStatus }}</li>
                     </ul>
                   </div>
                 </div>
                 <div class="columns">
-                  <div class="column has-text-left">
+                  <div class="column has-text-centered">
                     <div class="field is-grouped">
                       <div class="control">
                         <a
                           class="button is-light"
                           @click="updateDevice"
                         >Update</a>
-                        <p class="help">
-                          New firmware
+                        <p class="help has-text-centered">
+                          Firmware
                         </p>
                       </div>
                       <div class="control">
@@ -159,17 +154,17 @@
                           class="button is-warning"
                           @click="rebootDevice"
                         >Restart</a>
-                        <p class="help">
-                          Reboot device
+                        <p class="help has-text-centered">
+                          Device
                         </p>
                       </div>
                       <div class="control">
                         <a
                           class="button is-danger"
                           @click="restoreDevice"
-                        >Factory Reset</a>
-                        <p class="help">
-                          Restore initial configuration
+                        >Factory<span class="is-hidden-mobile"> Reset</span></a>
+                        <p class="help has-text-centered">
+                          Initial conf.
                         </p>
                       </div>
                     </div>
@@ -196,7 +191,6 @@ export default {
       status: {
         upTime: '',
         localTime: '',
-        chipId: 0,
         freeHeap: 0,
         vcc: 0,
         ntc_temperature: 20,
@@ -207,7 +201,9 @@ export default {
         mqttService: '',
         ntpService: '',
         channels: [0, 0, 0, 0, 0, 0, 0, 0],
-        brightness: 0
+        brightness: 0,
+        firmware: '',
+        hardware: ''
       },
       colors: [],
       power: [],
@@ -224,7 +220,7 @@ export default {
     },
     ntpStatus: function () {
       let status = this.status.ntpService.enabled ? 'on' : 'off'
-      status += this.status.ntpService.sync ? ', sync`d' : ', not sync'
+      status += this.status.ntpService.sync ? ', sync' : ', not sync'
       return status
     }
   },
@@ -245,7 +241,11 @@ export default {
         this.power = settingsResponse.data.leds.filter(led => led.state === 1).map((value, index, array) => value.power)
         this.active = settingsResponse.data.leds.map((led) => led.state)
       } catch (e) {
-        eventBus.$emit('message', e, 'danger')
+        if (e.response) {
+          // eventBus.$emit('message', e.response.data.message, 'danger')
+        } else {
+          eventBus.$emit('message', 'unexpected error', 'danger')
+        }
       }
       eventBus.$emit('loading', false)
     },
@@ -261,8 +261,8 @@ export default {
       }
 
       if (channels[index]) {
-        const percent = channels[index] / 100
-        const power = this.power[index]
+        const percent = channels[index] / 255
+        const power = this.power[index] * this.status.brightness / 100
 
         string += `${parseInt(percent * 100)}%`
         string += ` (${parseInt(percent * power)} Watts)`
@@ -271,28 +271,69 @@ export default {
 
       return 'OFF '
     },
+    totalPower () {
+      const active = this.active
+      const power = this.power
+      const brightness = this.status.brightness / 100
+      const channels = this.status.channels.filter((value, index) => active[index])
+      let totalPow = 0
+
+      if (channels) {
+        totalPow = channels.reduce((total, duty, index) => total + duty / 255 * power[index] * brightness, 0)
+      }
+
+      return totalPow.toFixed(2)
+    },
     async restoreDevice () {
-      try {
-        let response = await http.get('/factory')
-        if (response.data.success) { eventBus.$emit('message', 'Factory Restoring...', 'success') }
-      } catch (e) {
-        eventBus.$emit('message', e, 'danger')
+      if (confirm('Do you really want to factory restore your device?')) {
+        if (confirm('Sure?')) {
+          try {
+            let response = await http.get('/factory')
+            if (response.data.success) {
+              eventBus.$emit('message', 'Factory Restoring...', 'success')
+            }
+          } catch (e) {
+            if (e.response) {
+              eventBus.$emit('message', e.response.data.message, 'danger')
+            } else {
+              eventBus.$emit('message', 'unexpected error', 'danger')
+            }
+          }
+        }
       }
     },
     async rebootDevice () {
-      try {
-        let response = await http.get('/reboot')
-        if (response.data.success) { eventBus.$emit('message', 'Rebooting...', 'success') }
-      } catch (e) {
-        eventBus.$emit('message', e, 'danger')
+      if (confirm('Do you really want to restart your device?')) {
+        if (confirm('Sure?')) {
+          try {
+            let response = await http.get('/reboot')
+            if (response.data.success) { eventBus.$emit('message', 'Rebooting...', 'success') }
+          } catch (e) {
+            if (e.response) {
+              eventBus.$emit('message', e.response.data.message, 'danger')
+            } else {
+              eventBus.$emit('message', 'unexpected error', 'danger')
+            }
+          }
+        }
       }
     },
     async updateDevice () {
-      try {
-        let response = await http.get('/update')
-        if (response.data.success) { eventBus.$emit('message', 'Update Firmware...', 'success') }
-      } catch (e) {
-        eventBus.$emit('message', e, 'danger')
+      if (confirm('Do you really want to update firmware from cloud?')) {
+        if (confirm('Sure?')) {
+          try {
+            let response = await http.get('/update')
+            if (response.data.success) {
+              eventBus.$emit('message', 'Update Firmware...', 'success')
+            }
+          } catch (e) {
+            if (e.response) {
+              eventBus.$emit('message', e.response.data.message, 'danger')
+            } else {
+              eventBus.$emit('message', 'unexpected error', 'danger')
+            }
+          }
+        }
       }
     },
     async setLight () {
@@ -305,7 +346,11 @@ export default {
 
           if (response.data.success) { eventBus.$emit('message', 'Applied...', 'success') }
         } catch (e) {
-          eventBus.$emit('message', e, 'danger')
+          if (e.response) {
+            eventBus.$emit('message', e.response.data.message, 'danger')
+          } else {
+            eventBus.$emit('message', 'unexpected error', 'danger')
+          }
         }
       }
     },
@@ -315,3 +360,13 @@ export default {
   }
 }
 </script>
+
+<style lang="scss">
+.tag {
+  border: dashed 1px;
+  border-bottom: solid 0.25em;
+  box-sizing: border-box;
+  padding-left: 0.25em !important;
+  padding-right: 0.25em !important;
+}
+</style>

@@ -1,16 +1,23 @@
 @charset "utf-8";
 @import "../../../node_modules/bulma/sass/utilities/_all.sass";
+@import "../../../node_modules/bulma/sass/helpers/_all.sass";
 @import "../../../node_modules/bulma/sass/base/_all.sass";
 @import "../../../node_modules/bulma/sass/elements/button.sass";
 @import "../../../node_modules/bulma/sass/elements/container.sass";
 @import "../../../node_modules/bulma/sass/elements/title.sass";
 @import "../../../node_modules/bulma/sass/elements/tag.sass";
 @import "../../../node_modules/bulma/sass/elements/notification.sass";
+@import "../../../node_modules/bulma/sass/elements/box.sass";
+@import "../../../node_modules/bulma/sass/elements/progress.sass";
 @import "../../../node_modules/bulma/sass/form/all.sass";
 @import "../../../node_modules/bulma/sass/components/navbar.sass";
-@import "../../../node_modules/bulma/sass/components/modal.sass";
+//@import "../../../node_modules/bulma/sass/components/modal.sass";
+@import "../../../node_modules/bulma/sass/components/level.sass";
 @import "../../../node_modules/bulma/sass/grid/_all.sass";
 @import "../../../node_modules/bulma/sass/layout/section.sass";
+@import "../../../node_modules/bulma/sass/layout/hero.sass";
+
+@import '~@radial-color-picker/vue-color-picker/dist/vue-color-picker.min.css';
 
 #app {
   font-family: 'Avenir', Helvetica, Arial, sans-serif;
@@ -61,6 +68,31 @@
   margin-bottom: 10px;
 }
 
+.m-t-12 {
+  margin-top: 12px;
+}
+
+.m-top-touch-navbar {
+  @media screen and (max-width: 1023px) {
+    margin-top: 52px;
+  }
+}
+
+/* Box */
+.box-header {
+  text-align: left;
+  border-bottom: 1px solid gray;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+}
+
+.even {
+  background-color: lighten($grey, 30%);
+}
+.odd {
+  background-color: lighten($grey, 45%);
+}
+
 /* loading */
 .is-disabled {
   opacity: 0.4;
@@ -95,7 +127,7 @@
 }
 
 .bg-notification {
-  padding: 1.25rem 2.5rem 1.25rem !important;
+  padding: 1.25rem 1.25rem !important;
 }
 
 /* vue transition  LIST */
@@ -114,4 +146,22 @@
 .list-enter, .list-leave-to /* .list-leave-active до версии 2.1.8 */ {
   opacity: 0;
   transform: translateX(-30px);
+}
+
+/* vue transition FADE */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity .5s;
+}
+.fade-enter, .fade-leave-to /* .fade-leave-active below version 2.1.8 */ {
+  opacity: 0;
+}
+
+/* Frappe chart */
+.chart-container .axis {
+  stroke: darkgray;
+}
+@media (max-width: 768px) {
+  .chart-legend {
+    display: none;
+  }
 }

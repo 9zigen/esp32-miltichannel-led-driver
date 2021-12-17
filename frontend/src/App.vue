@@ -1,7 +1,7 @@
 <template>
   <div
     id="app"
-    class="has-background-dark has-text-light"
+    class="has-background-grey-dark has-text-light"
   >
     <navbar />
     <router-view v-bind:class="{'is-disabled': isLoading}" />
@@ -21,6 +21,8 @@
 import Notification from '@/components/Ui/Notification'
 import Navbar from '@/components/Ui/Navbar'
 import { eventBus } from './eventBus'
+import { mutations } from '@/store'
+import { http } from '@/http'
 
 export default {
   name: 'App',
@@ -39,9 +41,24 @@ export default {
         text: 'text',
         visible: false,
         autoHide: null,
-        timeOut: 3000
+        timeOut: 2000
       }
     }
+  },
+  created: function () {
+    let vm = this
+    http.interceptors.response.use(undefined, function (err) {
+      return new Promise(function (resolve, reject) {
+        if (err.response.status === 401 && err.response.config && !err.response.config.__isRetryRequest) {
+          // if you ever get an unauthorized, logout the user
+          mutations.logout()
+          if (vm.$route.name !== 'login') {
+            vm.$router.push('/login')
+          }
+        }
+        throw err
+      })
+    })
   },
   mounted () {
     eventBus.$on('message', (text, type) => {

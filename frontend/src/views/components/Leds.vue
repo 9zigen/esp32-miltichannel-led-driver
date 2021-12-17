@@ -1,114 +1,164 @@
 <template>
-  <div>
-    <transition-group
-      name="list"
-      appear
-    >
+  <div class="columns is-marginless is-multiline">
+    <div class="column is-12 has-text-left">
+      <!-- LEDS -->
+      <span class="subtitle is-4 is-uppercase has-text-grey-light">Led channels</span>
       <div
         v-for="(led, index) in leds"
         v-bind:key="led.id"
-        class="columns is-marginless"
+        class="has-text-left"
       >
-        <div class="column">
-          <div class="notification bg-notification is-light">
-            <div class="field is-horizontal">
-              <div class="field-label is-normal">
-                <label class="label">Channel {{ led.id }}</label>
+        <div class="box mb-2">
+          <!-- Header -->
+          <div class="box-header">
+            <div class="level is-mobile">
+              <div class="level-left">
+                <div class="level-item">
+                  <h3 class="title is-5 is-marginless has-text-grey">
+                    Channel #{{ led.id }}
+                  </h3>
+                </div>
               </div>
-              <div class="field-body">
-                <!-- state -->
-                <div class="field">
-                  <div class="control has-text-centered">
-                    <toggle-switch
-                      v-model.number="led.state"
-                      round
-                    />
-                  </div>
-                  <p class="help">
-                    Enable
-                  </p>
-                </div>
-                <!-- color -->
-                <div class="field">
-                  <div class="control">
-                    <div class="select">
-                      <select
-                        v-model="led.color"
-                        name="color"
-                      >
-                        <option
-                          v-for="(option, index) in $ledOptions"
-                          v-bind:key="index"
-                          v-bind:value="option.value"
-                        >
-                          {{ option.text }}
-                        </option>
-                      </select>
-                    </div>
-                    <p class="help">
-                      Channel Color
-                    </p>
-                  </div>
-                </div>
-                <!-- power -->
-                <div class="field">
-                  <div class="control">
-                    <input
-                      v-model.number="led.power"
-                      class="input"
-                      type="text"
-                      placeholder="channel power"
-                    >
-                  </div>
-                  <p class="help">
-                    Channel Power (Watts)
-                  </p>
+              <div class="level-right">
+                <div class="level-item">
+                  <toggle-switch
+                    v-model.number="led.state"
+                    round
+                  />
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="column">
-          <div class="notification bg-notification has-text-dark has-text-left" v-bind:class="[index % 2 ? 'even' : 'odd']">
-            <h4 class="subtitle">
-              MQTT Topics
-            </h4>
+          <!-- Color -->
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Color</label>
+            </div>
+            <div class="field-body">
+              <div class="field is-narrow">
+                <div class="control">
+                  <div class="select is-fullwidth">
+                    <select
+                      v-model="led.color"
+                      name="color"
+                    >
+                      <option
+                        v-for="(color, color_id) in $ledColorOptions"
+                        v-bind:key="color_id"
+                        v-bind:value="color.value"
+                      >
+                        {{ color.text }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-            <ul class="m-b-10">
-              <li>On/Off GET {{ services.hostname }}/channel/{{ led.id }}/state</li>
-              <li>On/Off SET {{ services.hostname }}/channel/{{ led.id }}/switch</li>
-            </ul>
+          <!-- duty limit -->
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Duty max</label>
+            </div>
+            <div class="field-body">
+              <div class="field has-addons is-narrow">
+                <div class="control">
+                  <input
+                    v-model.number="led.duty_max"
+                    class="input"
+                    type="text"
+                    placeholder="Duty limit"
+                  >
+                </div>
+                <p class="control">
+                  <a class="button is-static">
+                    0 - 255
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
 
-            <ul class="m-b-10">
-              <li>Brightness GET {{ services.hostname }}/brightness</li>
-              <li>Brightness SET {{ services.hostname }}/brightness/set</li>
-            </ul>
+          <!-- power -->
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Power</label>
+            </div>
+            <div class="field-body">
+              <div class="field has-addons is-narrow">
+                <div class="control">
+                  <input
+                    v-model.number="led.power"
+                    class="input"
+                    type="text"
+                    placeholder="channel power"
+                  >
+                </div>
+                <p class="control">
+                  <a class="button is-static">
+                    Watts
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
 
-            <ul>
-              <li>Channel Duty in % GET {{ services.hostname }}/channel/{{ led.id }}</li>
-              <li>Channel Duty in % SET {{ services.hostname }}/channel/{{ led.id }}/set</li>
-            </ul>
+          <div>
+            <a
+              v-show="!mqtt_info[index]"
+              class="m-b-10"
+              @click="showDetails(index)"
+            >
+              show mqtt topics
+            </a>
+
+            <a
+              v-show="mqtt_info[index]"
+              @click="showDetails(index)"
+            >
+              hide mqtt topics
+            </a>
+
+            <transition name="fade">
+              <div v-show="mqtt_info[index]">
+                <ul class="m-b-10">
+                  <li>On/Off GET {{ services.hostname }}/channel/{{ led.id }}/state</li>
+                  <li>On/Off SET {{ services.hostname }}/channel/{{ led.id }}/switch</li>
+                </ul>
+
+                <ul class="m-b-10">
+                  <li>Brightness GET {{ services.hostname }}/brightness</li>
+                  <li>Brightness SET {{ services.hostname }}/brightness/set</li>
+                </ul>
+
+                <ul>
+                  <li>Channel Duty in % GET {{ services.hostname }}/channel/{{ led.id }}</li>
+                  <li>Channel Duty in % SET {{ services.hostname }}/channel/{{ led.id }}/set</li>
+                </ul>
+              </div>
+            </transition>
           </div>
         </div>
       </div>
-    </transition-group>
 
-    <!-- Buttons -->
-    <div class="buttons is-centered">
-      <span
-        class="button is-primary"
-        @click="saveLeds"
-      >
-        <check-icon size="1.5x" /> Apply
-      </span>
+      <!-- Buttons -->
+      <div class="buttons is-centered">
+        <span
+          class="button is-primary"
+          @click="saveLeds"
+        >
+          <check-icon size="1.5x" /> Apply
+        </span>
 
-      <span
-        class="button is-danger"
-        @click="loadLeds"
-      >
-        <x-icon size="1.5x" /> Cancel
-      </span>
+        <span
+          class="button is-danger"
+          @click="loadLeds"
+        >
+          <x-icon size="1.5x" /> Cancel
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -122,19 +172,35 @@ export default {
   data () {
     return {
       services: {},
-      leds: []
+      leds: [],
+      schedule_mode: 0,
+      mqtt_info: []
     }
   },
   mounted () {
     this.loadLeds()
+    this.mqtt_info = new Array(8).fill(0, 0, 7)
   },
   methods: {
-    async saveLeds () {
-      let response = await http.post('/api/settings', { leds: this.leds })
-      if (response.data.success) {
-        eventBus.$emit('message', 'Saved', 'success')
+    showDetails (id) {
+      if (this.mqtt_info[id] === 0) {
+        this.mqtt_info.splice(id, 1, 1)
       } else {
-        eventBus.$emit('message', 'NOT Saved', 'danger')
+        this.mqtt_info.splice(id, 1, 0)
+      }
+    },
+    async saveLeds () {
+      try {
+        let response = await http.post('/api/settings', { leds: this.leds })
+        if (response.data.success) {
+          eventBus.$emit('message', 'Saved', 'success')
+        }
+      } catch (e) {
+        if (e.response) {
+          eventBus.$emit('message', e.response.data.message, 'danger')
+        } else {
+          eventBus.$emit('message', 'unexpected error', 'danger')
+        }
       }
     },
     async loadLeds () {
@@ -145,13 +211,3 @@ export default {
   }
 }
 </script>
-
-<style scoped lang="scss">
-  $yellow: #ffdd57;
-  .even {
-    background-color: lighten($yellow, 20%);
-  }
-  .odd {
-    background-color: lighten($yellow, 25%);
-  }
-</style>

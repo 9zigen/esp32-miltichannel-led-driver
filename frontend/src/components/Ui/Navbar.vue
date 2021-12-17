@@ -1,13 +1,13 @@
 <template>
   <nav
-    class="navbar is-light"
+    class="navbar is-fixed-top-touch is-light"
     role="navigation"
     aria-label="main navigation"
   >
     <div class="navbar-brand">
       <a
         class="navbar-item"
-        href="https://alab.cc"
+        href="/"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

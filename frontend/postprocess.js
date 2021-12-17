@@ -24,11 +24,11 @@ const html = `
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
-    <title>ESP8266 Led Driver</title>
+    <title>Led Controller</title>
   </head>
   <body>
     <noscript>
-      <strong>We're sorry but ESP8266 Led Driver doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
+      <strong>We're sorry but ESP32 Led Driver doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
     </noscript>
     <div id="app"></div>
     <script>${js}</script>
