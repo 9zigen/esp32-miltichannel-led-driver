@@ -1,7 +1,7 @@
 /***
 ** Created by Aleksey Volkov on 19.12.2019.
 ***/
-
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -9,34 +9,44 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <freertos/event_groups.h>
-#include <stmdriver.h>
 #include <esp_timer.h>
+#include <mcp7940.h>
 
+
+#include "sntp.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "lwip/apps/sntp.h"
 
-#include "main.h"
-#include "settings.h"
 #include "rtc.h"
+#include "main.h"
+#include "board.h"
+#include "connect.h"
+#include "settings.h"
 
 static const char *TAG = "RTC";
 
 uint8_t ntp_sync = 0;
+
+static void time_sync_notification_cb(struct timeval *tv)
+{
+  ESP_LOGI(TAG, "Notification of a time synchronization event");
+}
 
 static void initialize_sntp(services_t * config)
 {
   ESP_LOGI(TAG, "Initializing SNTP");
   sntp_setoperatingmode(SNTP_OPMODE_POLL);
   sntp_setservername(0, config->ntp_server);
+  sntp_set_time_sync_notification_cb(time_sync_notification_cb);
   sntp_init();
 }
 
 static void obtain_time(void)
 {
-  xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, 1000 * 30 / portTICK_RATE_MS);
+  xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, 1000 * 30 / portTICK_RATE_MS);
 
-  services_t * services = get_service_config();
+  services_t * services = get_services();
 
   if (services->enable_ntp && strlen(services->ntp_server) > 5)
   {
@@ -49,49 +59,95 @@ static void obtain_time(void)
   int retry = 0;
   const int retry_count = 10;
 
-  while (timeinfo.tm_year < (2020 - 1900) && ++retry < retry_count) {
+  while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
     ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-
-    time(&now);
-    localtime_r(&now, &timeinfo);
   }
+
+  time(&now);
+  localtime_r(&now, &timeinfo);
 
   if (retry < retry_count) {
     ntp_sync = 1;
   }
 }
 
+/* Get time from stm32 rtc */
+//void sync_time()
+//{
+//  struct tm timeinfo;
+//  datetime_t datetime;
+//
+//  /* load config */
+//  services_t * services = get_services();
+//
+//  if (services->enable_ntp && ntp_sync) {
+//    ESP_LOGI(TAG, "NTP Sync`d, sync MCP7940");
+//
+//  }
+//
+//  mcp7940_get_datetime(&datetime);
+//
+//  timeinfo.tm_year = datetime.year + 2000 - 1900;  /* stm return only last two dig of year */
+//  timeinfo.tm_mon  = datetime.month - 1;
+//  timeinfo.tm_mday = datetime.day;
+//  timeinfo.tm_wday = datetime.weekday;
+//  timeinfo.tm_hour = datetime.hour;
+//  timeinfo.tm_min  = datetime.min;
+//  timeinfo.tm_sec  = datetime.sec;
+//
+//  time_t stm_time = mktime(&timeinfo);
+//  struct timeval stm_now = { .tv_sec = stm_time };
+//
+//  /* Set time from STM RTC */
+//  settimeofday(&stm_now, NULL);
+//}
+
 void init_clock()
 {
   time_t now;
   struct tm timeinfo;
   char strftime_buf[64];
+  char tz_buff[32];
 
   /* load config */
-  services_t * services = get_service_config();
+  services_t * services = get_services();
 
-  /* Get time from stm32 rtc */
-  stm_datetime_t datetime;
-  get_stm_rtc(&datetime);
+  /* Set timezone from config */
+  if (services->utc_offset > 0) {
+    snprintf(tz_buff, 32, "UTC-%d", services->utc_offset + ((uint8_t)services->ntp_dst));    //GMT+2
+  } else {
+    uint8_t offset = fabs((double)services->utc_offset);
+    snprintf(tz_buff, 32, "UTC+%d",  offset + ((uint8_t)services->ntp_dst));    //UTC-2
+  }
+  setenv("TZ", tz_buff, 1);
+  tzset();
+  ESP_LOGI(TAG, "new TZ is: %s", getenv("TZ"));
+
+
+#ifdef USE_RTC
+  /* Get time from mcp7940 rtc */
+  datetime_t datetime;
+  mcp7940_get_datetime(&datetime);
 
   timeinfo.tm_year = datetime.year + 2000 - 1900;  /* stm return only last two dig of year */
   timeinfo.tm_mon  = datetime.month - 1;
   timeinfo.tm_mday = datetime.day;
   timeinfo.tm_wday = datetime.weekday;
   timeinfo.tm_hour = datetime.hour;
-  timeinfo.tm_min  = datetime.minute;
-  timeinfo.tm_sec  = datetime.second;
+  timeinfo.tm_min  = datetime.min;
+  timeinfo.tm_sec  = datetime.sec;
 
   time_t stm_time = mktime(&timeinfo);
   struct timeval stm_now = { .tv_sec = stm_time };
 
   /* Set time from STM RTC */
   settimeofday(&stm_now, NULL);
+#endif
 
   /* Print time from STM RTC */
   strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-  ESP_LOGI(TAG, "The current date/time in STM RTC is: %s", strftime_buf);
+  ESP_LOGI(TAG, "The current date/time is: %s", strftime_buf);
 
   // Is time set? If not, tm_year will be (1970 - 1900).
   if (timeinfo.tm_year < (2020 - 1900)) {
@@ -112,41 +168,32 @@ void init_clock()
       strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
       ESP_LOGI(TAG, "The NTP date/time is: %s", strftime_buf);
 
-      /* set STM time in local time */
+#ifdef USE_RTC
+      /* set MCP7940 time in local time */
       datetime.year = 1900 + timeinfo.tm_year - 2000; /* only 2 last dig in STM RTC */
       datetime.month = timeinfo.tm_mon + 1;           /* 0 - Jan */
       datetime.day = timeinfo.tm_mday;
       datetime.weekday = timeinfo.tm_wday;
       datetime.hour = timeinfo.tm_hour;
-      datetime.minute = timeinfo.tm_min;
-      datetime.second = timeinfo.tm_sec;
+      datetime.min = timeinfo.tm_min;
+      datetime.sec = timeinfo.tm_sec;
 
-      set_stm_rtc(&datetime);
+      mcp7940_set_datetime(&datetime);
+#endif
     }
   }
   else
   {
-    ESP_LOGI(TAG, "NTP Disabled. Will use time from stm32 rtc.");
+    ESP_LOGI(TAG, "NTP Disabled. Will use time from MCP7940 rtc.");
   }
-
-  /* Set timezone from config */
-  char tz_buff[32];
-  if (services->utc_offset > 0) {
-    snprintf(tz_buff, 32, "UTC-%d", services->utc_offset + ((uint8_t)services->ntp_dst));    //GMT+2
-  } else {
-    snprintf(tz_buff, 32, "UTC+%d", services->utc_offset + ((uint8_t)services->ntp_dst));    //UTC-2
-  }
-  setenv("TZ", tz_buff, 1);
-  ESP_LOGI(TAG, "new TZ is: %s", getenv("TZ"));
-  tzset();
 
   /* update local time */
   time(&now);
   localtime_r(&now, &timeinfo);
 
-  /* Print Local Time esp8266 */
+  /* Print Local Time */
   strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-  ESP_LOGI(TAG, "The Local esp8266 date/time is: %s", strftime_buf);
+  ESP_LOGI(TAG, "The Local date/time is: %s", strftime_buf);
 
 }
 

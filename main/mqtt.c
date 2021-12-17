@@ -10,12 +10,11 @@
 #include <monitor.h>
 #include <cJSON.h>
 #include <rtc.h>
-#include <stmdriver.h>
 #include "mqtt_client.h"
 #include "esp_wifi.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
-#include "esp_event_loop.h"
+#include "esp_event.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,14 +32,14 @@
 #include "settings.h"
 #include "mqtt.h"
 
-#define DEFAULT_ROOT "LED_DRIVER"  /* MQTT default root topic */
-
+#define TELEMETRY_TOPIC  "v1/devices/me/telemetry"    /* ThingsBoard MQTT telemetry topic */
 static const char *TAG = "MQTT";
 
 esp_mqtt_client_handle_t client;
 uint8_t mqtt_enabled = 0;
 uint8_t mqtt_connected = 0;
-TimerHandle_t xTimerStatus;
+static uint8_t mqtt_started = 0;
+TimerHandle_t timer_publish_status;
 
 /* Private */
 static void mqtt_subscribe();
@@ -53,29 +52,20 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
   // int msg_id;
   // your_context_t *context = event->context;
   switch (event->event_id) {
+    case MQTT_EVENT_BEFORE_CONNECT:
     case MQTT_EVENT_CONNECTED:
       ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
       mqtt_connected = 1;
-      mqtt_subscribe();
-
-      /* publish current info */
-      mqtt_publish_device_status();
-      mqtt_publish_channel_duty();
-      mqtt_publish_brightness();
-      mqtt_publish_channel_state();
-
       /* start device info timer */
-      xTimerStart( xTimerStatus, 100 );
+      xTimerStart(timer_publish_status, 100 );
       break;
     case MQTT_EVENT_DISCONNECTED:
       ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
       mqtt_connected = 0;
-      xTimerStop( xTimerStatus, 100 );
+      xTimerStop(timer_publish_status, 100 );
       break;
     case MQTT_EVENT_SUBSCRIBED:
       ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-//      msg_id = esp_mqtt_client_publish(client, CONFIG_EMITTER_CHANNEL_KEY"/topic/", "data", 0, 0, 0);
-//      ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
       break;
     case MQTT_EVENT_UNSUBSCRIBED:
       ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -89,6 +79,11 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event)
       break;
     case MQTT_EVENT_ERROR:
       ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+      break;
+    case MQTT_EVENT_DELETED:
+      ESP_LOGI(TAG, "MQTT_EVENT_DELETED");
+      break;
+    case MQTT_EVENT_ANY:
       break;
   }
   return ESP_OK;
@@ -107,39 +102,73 @@ static void vTimerCallback( TimerHandle_t xTimer )
  * */
 void init_mqtt(void)
 {
-  services_t * settings = get_service_config();
+  services_t * services = get_services();
 
   char mqtt_address_buff[64];
   char ip_address[16];
-  ip_to_string(settings->mqtt_ip_address, ip_address);
-  snprintf(mqtt_address_buff, 64, "mqtt://%s:%d", ip_address, settings->mqtt_port);
+  ip_to_string(services->mqtt_ip_address, ip_address);
+  snprintf(mqtt_address_buff, 64, "mqtt://%s:%d", ip_address, services->mqtt_port);
 
-  ESP_LOGI(TAG, "enabled: %d | address: %s | user:%s | password:%s", settings->enable_mqtt, mqtt_address_buff,
-           settings->mqtt_user, settings->mqtt_password);
+  ESP_LOGI(TAG, "enabled: %d | address: %s | user:%s | password:%s", services->enable_mqtt, mqtt_address_buff,
+           services->mqtt_user, services->mqtt_password);
 
-  if (settings->enable_mqtt && strlen(mqtt_address_buff) > 20)
+  if (services->enable_mqtt && strlen(mqtt_address_buff) > 20)
   {
-    esp_mqtt_client_config_t mqtt_cfg;
-    mqtt_cfg.uri = (const char*) &mqtt_address_buff;
-    mqtt_cfg.event_handle = mqtt_event_handler;
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .uri = mqtt_address_buff,
+        .event_handle = mqtt_event_handler
+    };
 
-    if (strlen(settings->mqtt_user) > 3) {
-      mqtt_cfg.username = (const char*) &settings->mqtt_user;
+    if (strlen(services->mqtt_user)) {
+      mqtt_cfg.username = "pi";
     }
 
-    if (strlen(settings->mqtt_password) > 1) {
-      mqtt_cfg.password = (const char*) &settings->mqtt_password;
+    if (strlen(services->mqtt_password)) {
+      mqtt_cfg.password = "mqttpass";
     }
 
     mqtt_enabled = 1;
 
     /* Create device status publish timer, 1 min period */
-    xTimerStatus = xTimerCreate("TimerDeviceStatus",60 * 1000 / portTICK_RATE_MS, pdTRUE, NULL, vTimerCallback);
+    timer_publish_status = xTimerCreate("TimerDeviceStatus", 10 * 60 * 1000 / portTICK_RATE_MS, pdTRUE, NULL, vTimerCallback);
 
     ESP_LOGI(TAG, "[APP] free memory before start MQTT client: %d bytes", esp_get_free_heap_size());
     client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_start(client);
+    if (client != NULL)
+    {
+      esp_mqtt_client_start(client);
+    }
   }
+}
+
+void task_mqtt(void *pvParameters)
+{
+  init_mqtt();
+
+  for (;;)
+  {
+    if (mqtt_connected && mqtt_enabled && !mqtt_started)
+    {
+      mqtt_started = 1;
+
+      /* subscribe to duty and brightness topics */
+      mqtt_subscribe();
+
+      /* publish current info */
+      mqtt_publish_device_status();
+      mqtt_publish_channel_duty();
+      mqtt_publish_brightness();
+      mqtt_publish_channel_state();
+    }
+
+    if ((mqtt_started || !mqtt_enabled))
+    {
+      vTaskDelete(NULL);
+    }
+
+    vTaskDelay(200/portTICK_RATE_MS);
+  }
+
 }
 
 /* On Message */
@@ -153,19 +182,27 @@ void on_mqtt_message(esp_mqtt_event_handle_t incoming_event) {
   ESP_LOGI(TAG,"TOPIC=%.*s", incoming_event->topic_len, incoming_event->topic);
   ESP_LOGI(TAG,"DATA=%.*s", incoming_event->data_len, incoming_event->data);
 
-  char topic[128];
-  
-  services_t * settings = get_service_config();
+  char string_buf[128];
+  char topic_buf[128];
+  char data_buf[128];
+  char command[7];
+  uint32_t channel = 0;
+
+  snprintf(topic_buf, 128, "%.*s", incoming_event->topic_len, incoming_event->topic);
+  snprintf(data_buf, 128, "%.*s", incoming_event->data_len, incoming_event->data);
+
+  services_t * settings = get_services();
   
   /* check brightness topic */
-  snprintf(topic, 128, "%s/brightness/set", settings->hostname);
+  snprintf(string_buf, 128, "%s/brightness/set", settings->hostname);
 
   /* Brightness received */
-  if (strncmp(incoming_event->topic, topic, 128) == 0) {
-    uint8_t brightness = atoi(incoming_event->data) & 0xff;
+  if (strncmp(topic_buf, string_buf, incoming_event->topic_len) == 0)
+  {
+    uint8_t brightness = atoi(data_buf);
 
     ESP_LOGI(TAG,"set brightness: %d\n", brightness);
-    set_brightness(brightness);
+    set_brightness(brightness, 0);
 
     /* update topics */
     mqtt_publish_brightness();
@@ -173,28 +210,26 @@ void on_mqtt_message(esp_mqtt_event_handle_t incoming_event) {
   }
 
   /* check switch or set command */
-  uint32_t channel = 0;
-  char command[7];
-  char scan[128];
-
   /* "sscanf" template example: LED_11324571/channel/%u/%6s */
-  snprintf(scan, 128, "%s/channel/%%u/%%6s", settings->hostname);
-  sscanf(topic, scan, &channel, command);
+  snprintf(string_buf, 128, "%s/channel/%%u/%%6s", settings->hostname);
+  sscanf(topic_buf, string_buf, &channel, command);
 
-  ESP_LOGI(TAG,"command: %s payload: %s\n", command, incoming_event->data);
+  ESP_LOGI(TAG,"command: %s payload: %s\n", command, data_buf);
 
-  if (strncmp(command, "set", 3) == 0) {
+  if (strncmp(command, "set", 3) == 0)
+  {
     /* Set command */
-    uint8_t duty = atoi(incoming_event->data) & 0xff;
-    set_channel_duty(channel, duty);
+    uint8_t duty = atoi(data_buf);
+    set_channel_duty(channel, duty, 0);
     ESP_LOGI(TAG,"set duty: %u channel: %u\n", duty, channel);
 
     /* update topics */
     mqtt_publish_channel_duty();
-
-  } else if (strncmp(command, "switch", 6) == 0) {
+  }
+  else if (strncmp(command, "switch", 6) == 0)
+  {
     /* switch command */
-    uint8_t state = atoi(incoming_event->data) & 0xff;
+    uint8_t state = atoi(data_buf);
     set_channel_state(channel, state);
     ESP_LOGI(TAG,"set state channel: %u to %u\n", channel, state);
 
@@ -210,12 +245,13 @@ static void mqtt_subscribe()
   int msg_id;
   char topic[128];
 
-  services_t * settings = get_service_config();
+  services_t * settings = get_services();
 
   /* Subscribe to Set Duty topic
    * [hostname]/channel/[channel_number]/set
    * */
-  for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
+  for (int i = 0; i < MAX_LED_CHANNELS; ++i)
+  {
     /* make topic string */
     snprintf(topic, 128, "%s/channel/%d/set", settings->hostname, i);
 
@@ -228,7 +264,8 @@ static void mqtt_subscribe()
   /* Subscribe to Switch topic
    * [hostname]/channel/[channel_number]/switch
    * */
-  for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
+  for (int i = 0; i < MAX_LED_CHANNELS; ++i)
+  {
     /* make topic string */
     snprintf(topic, 128, "%s/channel/%d/switch", settings->hostname, i);
 
@@ -261,7 +298,7 @@ void mqtt_publish_brightness()
   char topic[128];
   char message_buf[10];
 
-  services_t * settings = get_service_config();
+  services_t * settings = get_services();
 
   /* make topic string */
   snprintf(topic, 128, "%s/brightness", settings->hostname);
@@ -269,8 +306,8 @@ void mqtt_publish_brightness()
   /* make message string */
   snprintf(message_buf, 128, "%d", get_brightness());
 
-  /* publish led status to topic QoS 0, ToDo Retain */
-  msg_id = esp_mqtt_client_publish(client, topic, message_buf, 0, settings->mqtt_qos, 0);
+  /* publish led status to topic */
+  msg_id = esp_mqtt_client_publish(client, topic, message_buf, strlen(message_buf), settings->mqtt_qos, settings->mqtt_retain);
   ESP_LOGI(TAG, "publish to: %s, msg: %s", topic, message_buf);
   ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
 }
@@ -287,7 +324,7 @@ void mqtt_publish_channel_duty()
   char topic[128];
   char message_buf[10];
 
-  services_t * settings = get_service_config();
+  services_t * settings = get_services();
 
   /* Publish */
   for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
@@ -298,10 +335,12 @@ void mqtt_publish_channel_duty()
     /* make message string */
     snprintf(message_buf, 128, "%d", get_channel_duty(i));
 
-    /* publish led status to topic QoS 0, ToDo Retain */
-    msg_id = esp_mqtt_client_publish(client, topic, message_buf, 0, settings->mqtt_qos, 0);
+    /* publish led status to topic */
+    msg_id = esp_mqtt_client_publish(client, topic, message_buf, strlen(message_buf), settings->mqtt_qos, settings->mqtt_retain);
     ESP_LOGI(TAG, "publish to: %s, msg: %s", topic, message_buf);
     ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+    vTaskDelay(200 / portTICK_RATE_MS);
   }
 }
 
@@ -317,7 +356,7 @@ void mqtt_publish_channel_state()
   char topic[128];
   char message_buf[10];
 
-  services_t * settings = get_service_config();
+  services_t * settings = get_services();
 
   /* Publish */
   for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
@@ -328,10 +367,12 @@ void mqtt_publish_channel_state()
     /* make message string */
     snprintf(message_buf, 128, "%d", get_channel_state(i));
 
-    /* publish led status to topic QoS 0, ToDo Retain */
-    msg_id = esp_mqtt_client_publish(client, topic, message_buf, 0, settings->mqtt_qos, 0);
+    /* publish led status to topic */
+    msg_id = esp_mqtt_client_publish(client, topic, message_buf, strlen(message_buf), settings->mqtt_qos, settings->mqtt_retain);
     ESP_LOGI(TAG, "publish to: %s, msg: %s", topic, message_buf);
     ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+    vTaskDelay(200 / portTICK_RATE_MS);
   }
 }
 
@@ -346,8 +387,9 @@ void mqtt_publish_device_status() {
   char topic[128];
   char * message_buf;
   char time_string[32];
+  char channel_name[10];
 
-  services_t * services = get_service_config();
+  services_t * services = get_services();
   system_status_t *system_status = get_system_status();
   get_time_string((char*) &time_string);
   /* make topic string */
@@ -357,68 +399,38 @@ void mqtt_publish_device_status() {
   cJSON *root = cJSON_CreateObject();
 
   det_time_string_since_boot((char*) &time_string);
-  cJSON_AddItemToObject(root, "upTime", cJSON_CreateString(time_string));
+  cJSON_AddItemToObject(root, "up_time", cJSON_CreateString(time_string));
 
   get_time_string((char*) &time_string);
-  cJSON_AddItemToObject(root, "localTime", cJSON_CreateString(time_string));
+  cJSON_AddItemToObject(root, "local_time", cJSON_CreateString(time_string));
 
-  cJSON_AddItemToObject(root, "freeHeap", cJSON_CreateNumber(system_status->free_heap));
-  cJSON_AddItemToObject(root, "vcc", cJSON_CreateNumber(get_stm_vcc_power()));
-  cJSON_AddItemToObject(root, "temperature", cJSON_CreateNumber(get_stm_ntc_temperature()));
-  cJSON_AddItemToObject(root, "wifiMode", cJSON_CreateString(system_status->wifi_mode));
-  cJSON_AddItemToObject(root, "ipAddress", cJSON_CreateString(system_status->net_address));
-  cJSON_AddItemToObject(root, "macAddress", cJSON_CreateString(system_status->mac));
-
-  /* MQTT status */
-  cJSON * mqtt_status = cJSON_CreateObject();
-  switch (get_mqtt_status()) {
-    case MQTT_DISABLED:
-      cJSON_AddFalseToObject(mqtt_status, "enabled");
-      cJSON_AddFalseToObject(mqtt_status, "connected");
-      break;
-
-    case MQTT_ENABLED_NOT_CONNECTED:
-      cJSON_AddTrueToObject(mqtt_status, "enabled");
-      cJSON_AddFalseToObject(mqtt_status, "connected");
-      break;
-
-    case MQTT_ENABLED_CONNECTED:
-      cJSON_AddTrueToObject(mqtt_status, "enabled");
-      cJSON_AddTrueToObject(mqtt_status, "connected");
-      break;
-  }
-  cJSON_AddItemToObject(root, "mqttService", mqtt_status);
-
-  cJSON * ntp_status = cJSON_CreateObject();
-  if (services->enable_ntp) {
-    cJSON_AddTrueToObject(ntp_status, "enabled");
-  } else {
-    cJSON_AddFalseToObject(mqtt_status, "enabled");
-  }
-  if (get_ntp_sync_status()) {
-    cJSON_AddTrueToObject(ntp_status, "sync");
-  } else {
-    cJSON_AddFalseToObject(mqtt_status, "sync");
-  }
-  cJSON_AddItemToObject(root, "ntpService", ntp_status);
+  cJSON_AddItemToObject(root, "free_heap", cJSON_CreateNumber(system_status->free_heap));
+//  cJSON_AddItemToObject(root, "vcc", cJSON_CreateNumber(get_stm_vcc_power()));
+//  cJSON_AddItemToObject(root, "ntc_temperature", cJSON_CreateNumber(get_stm_ntc_temperature()));
+//  cJSON_AddItemToObject(root, "board_temperature", cJSON_CreateNumber(get_stm_mcu_temperature()));
+  cJSON_AddItemToObject(root, "local_ip_address", cJSON_CreateString(system_status->net_address));
+  cJSON_AddItemToObject(root, "mac_address", cJSON_CreateString(system_status->mac));
   cJSON_AddItemToObject(root, "brightness", cJSON_CreateNumber(get_brightness()));
 
   /* Channels duty */
-  cJSON *channels = cJSON_CreateArray();
-  for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
-    cJSON_AddItemToArray(channels, cJSON_CreateNumber(get_channel_duty(i)));
+  for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i) {
+    snprintf(channel_name, 10, "channel_%u", i);
+    cJSON_AddItemToObject(root, channel_name, cJSON_CreateNumber(get_channel_duty(i)));
   }
-  cJSON_AddItemToObject(root, "channels", channels);
+
   message_buf = cJSON_Print(root);
   if (message_buf == NULL)
   {
     ESP_LOGE(TAG, "failed to print status json.");
   }
 
-  /* publish led status to topic QoS 0, ToDo Retain */
-  msg_id = esp_mqtt_client_publish(client, topic, message_buf, 0, services->mqtt_qos, 0);
-  ESP_LOGI(TAG, "publish to: %s, msg: %s", topic, message_buf);
-  ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+  cJSON_Delete(root);
+
+  /* publish led status to topic */
+  msg_id = esp_mqtt_client_publish(client, topic, message_buf, strlen(message_buf), services->mqtt_qos, services->mqtt_retain);
+  free(message_buf);
+  ESP_LOGD(TAG, "publish to: %s", topic);
+  ESP_LOGD(TAG, "sent publish successful, msg_id=%d", msg_id);
 }
 
 mqtt_service_status_t get_mqtt_status()

@@ -1,0 +1,18 @@
+//
+// Created by Aleksey Volkov on 20.11.2020.
+//
+
+#ifndef ESP32_CC_LED_DRIVER_RTOS_BOARD_H
+#define ESP32_CC_LED_DRIVER_RTOS_BOARD_H
+
+#define USE_RTC
+#define USE_FAN_PWM
+//#define USE_FAN_ALWAYS
+//#define CUSTOM_3CH_CONTROLLER
+//#define CUSTOM_5CH_CONTROLLER
+//#define CUSTOM_5CH_LED_DRIVER_AIO
+#define PICO_D4_5CH_LED_DRIVER_AIO
+//#define CUSTOM_7CH_LED_DRIVER_AIO
+//#define THINGSBOARD
+
+#endif //ESP32_CC_LED_DRIVER_RTOS_BOARD_H

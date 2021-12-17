@@ -10,6 +10,8 @@
 
 #include "include/led.h"
 
+#define LED_PIN CONFIG_CONTROLLER_LED_STATUS
+
 /* LED Notification */
 uint8_t modes[] = {
     0B00000000, /* Off */
@@ -30,14 +32,20 @@ void set_led_mode(led_mode_t mode)
 
 void task_led(void *pvParameters)
 {
+  gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
+
+  /* custom */
   gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_NUM_2, 1);
 
   set_led_mode(LED_TWO_BLINK);
 
   while (1) {
     if( blink_mode & 1<<(blink_loop & 0x07) ) {
+      gpio_set_level(LED_PIN, 0);
       gpio_set_level(GPIO_NUM_2, 0);
     } else {
+      gpio_set_level(LED_PIN, 1);
       gpio_set_level(GPIO_NUM_2, 1);
 
     }

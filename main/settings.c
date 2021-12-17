@@ -10,24 +10,28 @@
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+
+#include "board.h"
 #include "settings.h"
 
 static const char *TAG = "SETTINGS";
 
 network_t network[MAX_NETWORKS];
 services_t service;
+thingsboard_t thingsboard;
 led_t led[MAX_LED_CHANNELS];
 schedule_t schedule[MAX_SCHEDULE];
+schedule_config_t schedule_config;
+cooling_t cooling;
+auth_t auth;
 
-const char * empty_str = " ";
+const char * empty_str = "empty";
 
 /* Initialize Settings */
 void init_settings()
 {
   esp_err_t err;
   nvs_handle nvs_handle;
-
-  ESP_LOGE(TAG, "calloc settings structs in memory");
 
   /* Initialize NVS */
   err = nvs_flash_init();
@@ -46,8 +50,8 @@ void init_settings()
     ESP_LOGE(TAG, "Error: unable to open the NVS partition");
   } else {
 
-    /* Read Networks Config */
-    ESP_LOGI(TAG, "Reading Networks Config ...");
+    /* Read Networks */
+    ESP_LOGI(TAG, "Reading Networks ...");
     size_t required_size = 0;  /* value will default to 0, if not set yet in NVS */
     err = nvs_get_blob(nvs_handle, "network", NULL, &required_size);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size != (sizeof(network_t) * MAX_NETWORKS)) {
@@ -69,8 +73,8 @@ void init_settings()
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
     }
 
-    /* Read Services Config */
-    ESP_LOGI(TAG, "Reading Service Config ...");
+    /* Read Services */
+    ESP_LOGI(TAG, "Reading Service ...");
     required_size = 0;  /* value will default to 0, if not set yet in NVS */
     err = nvs_get_blob(nvs_handle, "service", NULL, &required_size);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size != (sizeof(services_t))) {
@@ -91,8 +95,30 @@ void init_settings()
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
     }
 
-    /* Read Leds Config */
-    ESP_LOGI(TAG, "Reading Led Config ...");
+    /* Read ThingsBoard */
+    ESP_LOGI(TAG, "Reading ThingsBoard ...");
+    required_size = 0;  /* value will default to 0, if not set yet in NVS */
+    err = nvs_get_blob(nvs_handle, "thingsboard", NULL, &required_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size != (sizeof(thingsboard_t))) {
+      ESP_LOGE(TAG, "config not saved yet! error: %s", esp_err_to_name(err));
+      set_default_thingsboard();
+    } else {
+      err = nvs_get_blob(nvs_handle, "thingsboard", &thingsboard, &required_size);
+    }
+    switch (err) {
+      case ESP_OK:
+        ESP_LOGI(TAG, "Done ThingsBoard");
+        break;
+      case ESP_ERR_NVS_NOT_FOUND:
+        ESP_LOGE(TAG, "ThingsBoard config not initialized yet!");
+        set_default_thingsboard();
+        break;
+      default :
+        ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+
+    /* Read Leds */
+    ESP_LOGI(TAG, "Reading Led ...");
     required_size = 0;  /* value will default to 0, if not set yet in NVS */
     err = nvs_get_blob(nvs_handle, "led", NULL, &required_size);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(led_t) * MAX_LED_CHANNELS)) {
@@ -113,8 +139,8 @@ void init_settings()
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
     }
 
-    /* Read Schedule Config */
-    ESP_LOGI(TAG, "Reading Schedule Config ...");
+    /* Read Schedule */
+    ESP_LOGI(TAG, "Reading Schedule ...");
     required_size = 0;  /* value will default to 0, if not set yet in NVS */
     err = nvs_get_blob(nvs_handle, "schedule", NULL, &required_size);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(schedule_t) * MAX_SCHEDULE)) {
@@ -130,6 +156,72 @@ void init_settings()
       case ESP_ERR_NVS_NOT_FOUND:
         ESP_LOGE(TAG, "Schedule config not initialized yet!");
         set_default_schedule();
+        break;
+      default :
+        ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+
+    /* Read Schedule Config */
+    ESP_LOGI(TAG, "Reading Schedule Config...");
+    required_size = 0;  /* value will default to 0, if not set yet in NVS */
+    err = nvs_get_blob(nvs_handle, "schedule_config", NULL, &required_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(schedule_config_t))) {
+      ESP_LOGE(TAG, "config not saved yet! error: %s", esp_err_to_name(err));
+      set_default_schedule_config();
+    } else {
+      err = nvs_get_blob(nvs_handle, "schedule_config", &schedule_config, &required_size);
+    }
+    switch (err) {
+      case ESP_OK:
+        ESP_LOGI(TAG, "Done Schedule config");
+        break;
+      case ESP_ERR_NVS_NOT_FOUND:
+        ESP_LOGE(TAG, "Schedule config config not initialized yet!");
+        set_default_schedule_config();
+        break;
+      default :
+        ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+
+    /* Read Cooling */
+    ESP_LOGI(TAG, "Reading Cooling...");
+    required_size = 0;  /* value will default to 0, if not set yet in NVS */
+    err = nvs_get_blob(nvs_handle, "cooling", NULL, &required_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(cooling_t))) {
+      ESP_LOGE(TAG, "config not saved yet! error: %s", esp_err_to_name(err));
+      set_default_cooling();
+    } else {
+      err = nvs_get_blob(nvs_handle, "cooling", &cooling, &required_size);
+    }
+    switch (err) {
+      case ESP_OK:
+        ESP_LOGI(TAG, "Done Cooling config");
+        break;
+      case ESP_ERR_NVS_NOT_FOUND:
+        ESP_LOGE(TAG, "Cooling config config not initialized yet!");
+        set_default_cooling();
+        break;
+      default :
+        ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+
+    /* Read Auth */
+    ESP_LOGI(TAG, "Reading Auth...");
+    required_size = 0;  /* value will default to 0, if not set yet in NVS */
+    err = nvs_get_blob(nvs_handle, "auth", NULL, &required_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(auth_t))) {
+      ESP_LOGE(TAG, "config not saved yet! error: %s", esp_err_to_name(err));
+      set_default_auth();
+    } else {
+      err = nvs_get_blob(nvs_handle, "auth", &auth, &required_size);
+    }
+    switch (err) {
+      case ESP_OK:
+        ESP_LOGI(TAG, "Done Auth config");
+        break;
+      case ESP_ERR_NVS_NOT_FOUND:
+        ESP_LOGE(TAG, "Auth config not initialized yet!");
+        set_default_auth();
         break;
       default :
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
@@ -208,15 +300,13 @@ void set_default_service()
   esp_err_t err;
   nvs_handle nvs_handle;
 
-  char hostname_buf[20];
-  sprintf(hostname_buf, "LED_%d", esp_random());
-  strlcpy(service.hostname, hostname_buf, 20);
+  strlcpy(service.hostname, "ledcontroller", 32);
 
   /* OTA */
   strlcpy(service.ota_url, CONFIG_OTA_URL, 64);
 
   /* NTP */
-  strlcpy(service.ntp_server, "es.pool.ntp.org", 20);
+  strlcpy(service.ntp_server, "es.pool.ntp.org", 32);
   service.utc_offset = 1;
   service.ntp_dst = false;
   service.enable_ntp = false;
@@ -257,20 +347,76 @@ void set_default_service()
   nvs_close(nvs_handle);
 };
 
+void set_default_thingsboard()
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  /* ThingsBoard Endpoint */
+  strlcpy(thingsboard.endpoint, empty_str, 64);
+
+  /* ThingsBoard MQTT */
+  strlcpy(thingsboard.token, empty_str, 32);
+  thingsboard.qos = 0;
+  thingsboard.retain = false;
+  thingsboard.rpc = false;
+  thingsboard.enable = false;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Service Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "thingsboard", &thingsboard, (size_t) (sizeof(thingsboard_t)));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Service Config in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done Default Service");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
 void set_default_led()
 {
   esp_err_t err;
   nvs_handle nvs_handle;
 
+#if MAX_LED_CHANNELS == 3
   const char default_colors[MAX_LED_CHANNELS][8] = {
-      {"#8A7AD4"}, {"#7C9CFF"}, {"#42B8F3"}, {"#4DF7FF"}, {"#6EB96E"}, {"#FDFE90"}, {"#FB647A"}, {"#990000"}};
+      {"#8A7AD4"}, {"#7C9CFF"}, {"#42B8F3"},
+  };
+#elif MAX_LED_CHANNELS == 5
+  const char default_colors[MAX_LED_CHANNELS][8] = {
+      {"#8A7AD4"}, {"#7C9CFF"}, {"#42B8F3"}, {"#4DF7FF"}, {"#6EB96E"}
+  };
+#else
+  const char default_colors[MAX_LED_CHANNELS][8] = {
+      {"#8A7AD4"}, {"#7C9CFF"}, {"#42B8F3"}, {"#4DF7FF"}, {"#6EB96E"}, {"#FDFE90"}, {"#FB647A"}, {"#990000"}
+  };
+#endif
 
   for(size_t i = 0; i < MAX_LED_CHANNELS; i++)
   {
     led[i].id    = i; 
     led[i].power = 0;                             /* 0 ->  0->0 in Watts x 10 */
     led[i].state = 1;                             /* 0 ->  OFF | 1 -> ON */
-    strlcpy(led[i].color, default_colors[i], 8);  /* default color #DDEFFF -> 'Cold White' in UI */
+    led[i].duty_max = 255;
+    strlcpy(led[i].color, default_colors[i], 8);  /* default color #B4D9F1 -> 'Cold White' in UI */
   }
 
   /* Open Storage */
@@ -314,11 +460,18 @@ void set_default_schedule()
     schedule[i].duty[0]         = 0; /* CH1 Default */
     schedule[i].duty[1]         = 0; /* CH2 Default */
     schedule[i].duty[2]         = 0; /* CH3 Default */
+
+#if MAX_LED_CHANNELS >= 4
     schedule[i].duty[3]         = 0; /* CH4 Default */
+#endif
+#if MAX_LED_CHANNELS >= 5
     schedule[i].duty[4]         = 0; /* CH5 Default */
+#endif
+#if MAX_LED_CHANNELS == 8
     schedule[i].duty[5]         = 0; /* CH6 Default */
     schedule[i].duty[6]         = 0; /* CH7 Default */
     schedule[i].duty[7]         = 0; /* CH8 Default */
+#endif
     schedule[i].brightness      = 0; /* All Channels brightness */
     schedule[i].active          = false;
   }
@@ -336,6 +489,137 @@ void set_default_schedule()
       ESP_LOGE(TAG, "Failed to Update Schedule Config in NVS");
     } else {
       ESP_LOGI(TAG, "Done Default Schedule");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_default_schedule_config()
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  schedule_config.mode            = ADVANCED;
+  schedule_config.sunrise_hour    = 0;
+  schedule_config.sunrise_minute  = 0;
+  schedule_config.sunset_hour     = 0;
+  schedule_config.sunset_minute   = 0;
+  schedule_config.brightness      = 0;
+  schedule_config.rgb             = false;
+  schedule_config.gamma           = 100; /* gamma correction x100 */
+
+  for(size_t i = 0; i < MAX_LED_CHANNELS; i++)
+  {
+    schedule_config.duty[i] = 0;
+  }
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Schedule cfg Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "schedule_config", &schedule_config, sizeof(schedule_config_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Schedule cfg Config in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done Default Schedule cfg");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_default_cooling()
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+#ifdef USE_FAN_PWM
+  cooling.installed   = true;
+#else
+  cooling.installed   = false;
+#endif
+  cooling.start_temp  = 35;
+  cooling.target_temp = 50;
+  cooling.max_temp    = 70;
+  cooling.pid_kp      = 0.1;
+  cooling.pid_ki      = 0.4;
+  cooling.pid_kd      = 0.01;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Cooling in NVS ...");
+    err = nvs_set_blob(nvs_handle, "cooling", &cooling, sizeof(cooling_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Cooling in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done Default Cooling");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_default_auth()
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  strlcpy(auth.user, "admin", 32);
+  strlcpy(auth.password, "12345678", 32);
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Auth in NVS ...");
+    err = nvs_set_blob(nvs_handle, "auth", &auth, sizeof(auth_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Auth in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done Default Auth");
     }
   }
 
@@ -420,6 +704,40 @@ void set_service(void)
   nvs_close(nvs_handle);
 };
 
+void set_thingsboard(void)
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating ThingsBoard Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "thingsboard", &thingsboard, (size_t) (sizeof(thingsboard_t)));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update ThingsBoard Config in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done New ThingsBoard");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
 void set_led(void)
 {
   esp_err_t err;
@@ -488,7 +806,7 @@ void set_schedule(void)
   nvs_close(nvs_handle);
 };
 
-void set_all_settings(void)
+void set_schedule_config(void)
 {
   esp_err_t err;
   nvs_handle nvs_handle;
@@ -498,31 +816,82 @@ void set_all_settings(void)
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Error: unable to open the NVS partition");
   } else {
-    /* Write Network */
-    ESP_LOGI(TAG, "Updating Network Config in NVS ...");
-    err = nvs_set_blob(nvs_handle, "network", network, (size_t) ((sizeof(network_t) * MAX_NETWORKS)));
-    if (err != ESP_OK) {
-      ESP_LOGE(TAG, "Failed to Update Network Config in NVS");
+    /* Write */
+    ESP_LOGI(TAG, "Updating Schedule cfg Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "schedule_config", &schedule_config, sizeof(schedule_config_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Schedule Config in NVS");
     } else {
-      ESP_LOGI(TAG, "Done New Network");
+      ESP_LOGI(TAG, "Done New Schedule Config");
     }
+  }
 
-    /* Write Service */
-    ESP_LOGI(TAG, "Updating Service Config in NVS ...");
-    err = nvs_set_blob(nvs_handle, "service", &service, (size_t) (sizeof(services_t)));
-    if (err != ESP_OK) {
-      ESP_LOGE(TAG, "Failed to Update Service Config in NVS");
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_cooling(void)
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Cooling in NVS ...");
+    err = nvs_set_blob(nvs_handle, "cooling", &cooling, sizeof(cooling_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Cooling in NVS");
     } else {
-      ESP_LOGI(TAG, "Done New Service");
+      ESP_LOGI(TAG, "Done New Cooling");
     }
+  }
 
-    /* Write Led */
-    ESP_LOGI(TAG, "Updating Led Config in NVS ...");
-    err = nvs_set_blob(nvs_handle, "led", led, (size_t) ((sizeof(led_t) * MAX_LED_CHANNELS)));
-    if (err != ESP_OK) {
-      ESP_LOGE(TAG, "Failed to Update Led Config in NVS");
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_auth(void)
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating Auth in NVS ...");
+    err = nvs_set_blob(nvs_handle, "auth", &auth, sizeof(auth_t));
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update Auth in NVS");
     } else {
-      ESP_LOGI(TAG, "Done New Led");
+      ESP_LOGI(TAG, "Done New Auth");
     }
   }
 
@@ -544,7 +913,7 @@ void erase_settings(void)
   ESP_ERROR_CHECK(nvs_flash_erase());
 }
 
-network_t * get_network_config(uint8_t network_id)
+network_t * get_networks(uint8_t network_id)
 {
   if (network_id >= MAX_NETWORKS)
     return &network[0];
@@ -552,12 +921,18 @@ network_t * get_network_config(uint8_t network_id)
   return &network[network_id];
 }
 
-services_t * get_service_config(void)
+services_t * get_services(void)
 {
   return &service;
 }
 
-led_t * get_led_config(uint8_t led_id)
+thingsboard_t * get_thingsboard(void)
+{
+  return &thingsboard;
+}
+
+
+led_t * get_leds(uint8_t led_id)
 {
   if (led_id >= MAX_LED_CHANNELS)
     return &led[0];
@@ -565,13 +940,29 @@ led_t * get_led_config(uint8_t led_id)
   return &led[led_id];
 }
 
-schedule_t * get_schedule_config(uint8_t schedule_id)
+schedule_t * get_schedule(uint8_t schedule_id)
 {
   if (schedule_id >= MAX_SCHEDULE)
     return &schedule[0];
 
   return &schedule[schedule_id];
 }
+
+schedule_config_t * get_schedule_config(void)
+{
+  return &schedule_config;
+}
+
+cooling_t * get_cooling(void)
+{
+  return &cooling;
+}
+
+auth_t * get_auth(void)
+{
+  return &auth;
+}
+
 
 void ip_to_string(uint8_t ip[4], char* string)
 {

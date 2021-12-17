@@ -13,4 +13,17 @@ config CONTROLLER_WIFI_PASS
         WiFi password (WPA or WPA2) for the example to use.
         Can be left blank if the network has no security set.
 
+config CONTROLLER_WIFI_CHANNEL
+    int "WiFi Channel"
+    range 1 13
+    default 1
+    help
+        WiFi SoftAp channel (network channel).
+
+config CONTROLLER_LED_STATUS
+    int "Board Status Led Pin"
+    default 1
+    help
+        Status Led Pin Number
+
 endmenu

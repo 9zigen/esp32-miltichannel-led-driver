@@ -11,7 +11,7 @@ typedef struct {
   char net_mask[16];
   char net_gateway[16];
   char mac[18];
-  uint8_t revision;
+  double mcu_temp;
   uint32_t free_heap;
 
 } system_status_t;
