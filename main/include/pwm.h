@@ -7,7 +7,7 @@
 
 void init_ledc();
 void ledc_fade(uint8_t channel, uint32_t duty, uint32_t steps);
-void ledc_fade_ms(uint8_t channel, uint32_t duty, uint32_t max_time_ms);
+void ledc_fade_ms(uint8_t channel, uint32_t duty, int max_time_ms);
 void ledc_set(uint8_t channel, uint32_t duty);
 void ledc_fan_set(uint32_t duty);
 uint32_t ledc_fan_get();

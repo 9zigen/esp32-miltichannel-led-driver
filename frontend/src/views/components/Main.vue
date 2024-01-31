@@ -122,6 +122,31 @@
           </div>
         </div>
 
+        <div class="field is-horizontal" v-show="scheduleConfig.mode === 0">
+          <div class="field-label is-normal">
+            <label class="label">Transition duration</label>
+          </div>
+          <div class="field-body">
+            <div class="field is-narrow">
+              <div class="field has-addons is-narrow">
+                <div class="control">
+                  <input
+                    v-model.number="scheduleConfig.simple_mode_duration"
+                    class="input"
+                    type="number"
+                    placeholder="sync group"
+                  >
+                </div>
+                <p class="control">
+                  <a class="button is-static">
+                    Min.
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="field is-horizontal">
           <div class="field-label is-normal">
             <label class="label">Gamma</label>
@@ -129,7 +154,7 @@
           <div class="field-body">
             <div class="field">
               <div class="control">
-                <div class="select is-fullwidth">
+                <div class="select is-narrow">
                   <select
                     v-model="scheduleConfig.gamma"
                     name="gamma"
@@ -158,6 +183,61 @@
                 <toggle-switch
                   v-model="scheduleConfig.rgb"
                   round
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field is-horizontal">
+          <div class="field-label is-normal">
+            <label class="label">Sync controllers</label>
+          </div>
+          <div class="field-body">
+            <div class="field is-narrow">
+              <div class="control">
+                <toggle-switch
+                  v-model="scheduleConfig.use_sync"
+                  round
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="field is-horizontal" v-show="scheduleConfig.use_sync">
+          <div class="field-label is-normal">
+            <label class="label">Group ID</label>
+          </div>
+          <div class="field-body">
+            <div class="field is-narrow">
+              <div class="field has-addons is-narrow">
+                <div class="control">
+                  <input
+                    v-model.number="scheduleConfig.sync_group"
+                    class="input"
+                    type="number"
+                    placeholder="sync group"
+                  >
+                </div>
+                <p class="control">
+                  <a class="button is-static">
+                    0-255
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="field is-horizontal" v-show="scheduleConfig.use_sync">
+          <div class="field-label is-normal">
+            <label class="label">Is Primary</label>
+          </div>
+          <div class="field-body">
+            <div class="field is-narrow">
+              <div class="control">
+                <toggle-switch
+                    v-model="scheduleConfig.sync_master"
+                    round
                 />
               </div>
             </div>

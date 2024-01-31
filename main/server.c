@@ -2,55 +2,47 @@
 ** Created by Aleksey Volkov on 15.12.2019.
 ***/
 
-#include <cJSON.h>
-#include <esp_ota_ops.h>
-#include <esp_timer.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 
+#include "cJSON.h"
 #include "string.h"
 #include "lwip/api.h"
-#include "esp_wifi.h"
 #include "esp_log.h"
-#include "esp_event.h"
 #include "nvs_flash.h"
+#include "esp_ota_ops.h"
+#include "esp_chip_info.h"
+#include "esp_timer.h"
 
 #include "board.h"
-#include "ota.h"
 #include "webpage.h"
-#include "settings.h"
 #include <monitor.h>
 #include "light.h"
 #include "main.h"
 #include "mcp7940.h"
 #include "adc.h"
-#include <fanspeed.h>
+#include "fanspeed.h"
 #include "rtc.h"
-#include "mqtt.h"
+#include "app_settings.h"
+#include "app_mqtt.h"
 #include "auth.h"
 #include "server.h"
+#include "web_socket.h"
 
 static const char *TAG="WEBSERVER";
 static httpd_handle_t server = NULL;
 static char auth_token[65];
+//static const char * dev_token = "344e8f2d82643e3908a8fa9d2130aa9973ee82a743a2bdb733a77fd551c19fc2";
+const char * app_uri[] = {"/", "/login", "/wifi", "/settings"};
 
-#define TOKEN_SIZE        (uint32_t)32
 #define SCRATCH_BUFSIZE   (uint32_t)4096
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 extern const uint8_t favicon_ico_start[] asm("_binary_favicon_ico_start");
 extern const uint8_t favicon_ico_end[]   asm("_binary_favicon_ico_end");
 
-//typedef struct rest_server_context {
-//  char tocken[TOCKEN_SIZE];
-//  char scratch[SCRATCH_BUFSIZE];
-//} rest_server_context_t;
-
-//static rest_server_context_t * rest_context = NULL;
-
 /* Function to free context */
-void session_free_func(void *ctx)
+__attribute__((unused)) void session_free_func(void *ctx)
 {
   ESP_LOGI(TAG, "Session Free Context function called");
   free(ctx);
@@ -59,11 +51,16 @@ void session_free_func(void *ctx)
 /*
  * {success: true}
  * */
-char * success_response_json()
+char *success_response_json(bool is_ok)
 {
   char *string = NULL;
   cJSON *response = cJSON_CreateObject();
-  cJSON_AddTrueToObject(response, "success");
+
+  if (is_ok) {
+    cJSON_AddTrueToObject(response, "success");
+  } else {
+    cJSON_AddFalseToObject(response, "success");
+  }
 
   string = cJSON_Print(response);
   if (string == NULL)
@@ -89,6 +86,7 @@ static esp_err_t validate_request(httpd_req_t *req)
       ESP_LOGD(TAG, "Found header => Authorization: %s", buf);
       if(strncmp(auth_token, buf, strlen(auth_token)) == 0) {
         ESP_LOGD(TAG, "Authorization: success");
+        free(buf);
         return ESP_OK;
       }
     }
@@ -108,16 +106,6 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
 /* This handler gets the present value of the accumulator */
 esp_err_t home_get_handler(httpd_req_t *req)
 {
-  /* Create session's context if not already available */
-//  if (! req->sess_ctx) {
-//    ESP_LOGI(TAG, "/ GET allocating new session");
-//    req->sess_ctx = malloc(sizeof(int));
-//    req->free_ctx = session_free_func;
-//    *(int *)req->sess_ctx = 0;
-//  }
-//  //*(int *)req->sess_ctx = val; //set session token
-//  ESP_LOGI(TAG, "/ GET handler send %d", *(int *)req->sess_ctx);
-
   httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
   httpd_resp_send(req, (const char *)&HTML, HTML_SIZE);
   return ESP_OK;
@@ -129,7 +117,7 @@ esp_err_t reboot_get_handler(httpd_req_t *req)
   /* Auth token validation */
   if (validate_request(req) == ESP_OK)
   {
-    char * response = success_response_json();
+    char * response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
 
@@ -148,7 +136,7 @@ esp_err_t factory_get_handler(httpd_req_t *req)
   /* Auth token validation */
   if (validate_request(req) == ESP_OK)
   {
-    char * response = success_response_json();
+    char * response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
 
@@ -168,7 +156,7 @@ esp_err_t ota_get_handler(httpd_req_t *req)
   /* Auth token validation */
   if (validate_request(req) == ESP_OK)
   {
-    char * response = success_response_json();
+    char * response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
 
@@ -211,7 +199,7 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     if (!header_skiped) {
       header_skiped = true;
 
-      // Lets find out where the actual data staers after the header info
+      // Let`s find out where the actual data staers after the header info
       char * files_start_p = strstr(buf, "\r\n\r\n") + 4;
 
       long files_part_len = recv_len - (files_start_p - buf);
@@ -240,8 +228,9 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     return ESP_FAIL;
   }
 
-  char * response = success_response_json();
+  char * response = success_response_json(1);
   httpd_resp_send(req, response, strlen(response));
+  free(response);
 
   vTaskDelay(500 / portTICK_PERIOD_MS);
   esp_restart();
@@ -278,15 +267,6 @@ esp_err_t status_get_handler(httpd_req_t *req)
 /* SCHEDULE GET current data */
 esp_err_t schedule_get_handler(httpd_req_t *req)
 {
-  /* Create session's context if not already available */
-//  if (! req->sess_ctx) {
-//    ESP_LOGI(TAG, "%s GET allocating new session", req->uri);
-//    req->sess_ctx = malloc(sizeof(int));
-//    req->free_ctx = session_free_func;
-//    *(int *)req->sess_ctx = 0;
-//  }
-//  ESP_LOGI(TAG, "%s GET handler send %d", req->uri, *(int *)req->sess_ctx);
-
   /* Auth token validation */
   if (validate_request(req) == ESP_OK)
   {
@@ -303,15 +283,6 @@ esp_err_t schedule_get_handler(httpd_req_t *req)
 /* SETTINGS GET current data */
 esp_err_t settings_get_handler(httpd_req_t *req)
 {
-  /* Create session's context if not already available */
-//  if (! req->sess_ctx) {
-//    ESP_LOGI(TAG, "%s GET allocating new session", req->uri);
-//    req->sess_ctx = malloc(sizeof(int));
-//    req->free_ctx = session_free_func;
-//    *(int *)req->sess_ctx = 0;
-//  }
-//  ESP_LOGI(TAG, "%s GET handler send %d", req->uri, *(int *)req->sess_ctx);
-
   /* Auth token validation */
   if (validate_request(req) == ESP_OK)
   {
@@ -380,11 +351,11 @@ static esp_err_t light_post_handler(httpd_req_t *req)
       ESP_LOGI(TAG, "light_post_handler new brightness %d", brightness->valueint);
     }
 
-    set_light(target_duty, target_brightness, FAST, 0);
+    set_light(target_duty, target_brightness, 1, 0);
 
     cJSON_Delete(root);
 
-    char *response = success_response_json();
+    char *response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
   }
@@ -460,7 +431,50 @@ static esp_err_t schedule_post_handler(httpd_req_t *req)
     /* Store New Schedule in NVS */
     set_schedule();
 
-    char *response = success_response_json();
+    char *response = success_response_json(1);
+    httpd_resp_send(req, response, strlen(response));
+    free(response);
+  }
+  free(buf);
+  return ESP_OK;
+}
+
+/* SCHEDULE STATUS POST new data */
+static esp_err_t schedule_status_post_handler(httpd_req_t *req)
+{
+  int total_len = req->content_len;
+
+  int cur_len = 0;
+  char *buf = malloc(req->content_len + 1);
+  int received = 0;
+  if (total_len >= SCRATCH_BUFSIZE) {
+    /* Respond with 500 Internal Server Error */
+    return ESP_FAIL;
+  }
+
+  /* Auth token validation */
+  if (validate_request(req) != ESP_OK)
+  {
+    httpd_resp_set_status(req, "401 Unauthorized!");
+    httpd_resp_send(req, NULL, 0);
+  } else {
+    while (cur_len < total_len) {
+      received = httpd_req_recv(req, buf + cur_len, total_len);
+      if (received <= 0) {
+        /* Respond with 500 Internal Server Error */
+        return ESP_FAIL;
+      }
+      cur_len += received;
+    }
+    buf[total_len] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    cJSON *status = cJSON_GetObjectItem(root, "status");
+    set_schedule_status(cJSON_IsTrue(status));
+
+    cJSON_Delete(root);
+
+    char *response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
   }
@@ -514,8 +528,12 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
         cJSON *power = cJSON_GetObjectItem(led_item, "power");
         cJSON *duty_max = cJSON_GetObjectItem(led_item, "duty_max");
         cJSON *state = cJSON_GetObjectItem(led_item, "state");
+        cJSON *sync_channel = cJSON_GetObjectItem(led_item, "sync_channel");
+        cJSON *sync_channel_group = cJSON_GetObjectItem(led_item, "sync_channel_group");
         led_config->power = power->valueint;
         led_config->duty_max = duty_max->valueint;
+        led_config->sync_channel = sync_channel->valueint;
+        led_config->sync_channel_group = sync_channel_group->valueint;
         led_config->state = state->valueint;
       }
 
@@ -528,14 +546,14 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     cJSON *networks = cJSON_GetObjectItem(root, "networks");
 
     if (cJSON_IsArray(networks)) {
+
+      /* Reset network cache */
+      for (uint8_t i = 0; i < MAX_NETWORKS; i++) {
+        network_t *network_config = get_networks(i);
+        network_config->active = false;
+      }
+
       if (cJSON_GetArraySize(networks) > 0) {
-
-        /* Reset network cache */
-        for (uint8_t i = 0; i < MAX_NETWORKS; i++) {
-          network_t *network_config = get_networks(i);
-          network_config->active = false;
-        }
-
         uint8_t network_id = 0;
         cJSON_ArrayForEach(network_item, networks) {
 
@@ -580,12 +598,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
 
           network_config->active = true;
           network_id++;
-        }
-      } else {
-        /* Reset network cache */
-        for (uint8_t i = 0; i < MAX_NETWORKS; i++) {
-          network_t *network_config = get_networks(i);
-          network_config->active = false;
         }
       }
 
@@ -769,8 +781,20 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
       cJSON *sunset_minute = cJSON_GetObjectItem(schedule_config_json, "sunset_minute");
       schedule_config->sunset_minute = sunset_minute->valueint;
 
+      cJSON *simple_mode_duration = cJSON_GetObjectItem(schedule_config_json, "simple_mode_duration");
+      schedule_config->simple_mode_duration = simple_mode_duration->valueint;
+
       cJSON *brightness = cJSON_GetObjectItem(schedule_config_json, "brightness");
       schedule_config->brightness = brightness->valueint;
+
+      cJSON *use_sync = cJSON_GetObjectItem(schedule_config_json, "use_sync");
+      schedule_config->use_sync = use_sync->valueint;
+
+      cJSON *sync_group = cJSON_GetObjectItem(schedule_config_json, "sync_group");
+      schedule_config->sync_group = sync_group->valueint;
+
+      cJSON *sync_master = cJSON_GetObjectItem(schedule_config_json, "sync_master");
+      schedule_config->sync_master = sync_master->valueint;
 
       cJSON *gamma = cJSON_GetObjectItem(schedule_config_json, "gamma");
       schedule_config->gamma = gamma->valueint;
@@ -823,6 +847,45 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
     }
 #endif
 
+    /* GPIO Config ------------------------- */
+    cJSON *gpio_item;
+    cJSON *gpio = cJSON_GetObjectItem(root, "gpio");
+
+    if (cJSON_IsArray(gpio)) {
+
+      /* Reset gpio cache */
+      for (uint8_t i = 0; i < MAX_BOARD_GPIO; i++) {
+        board_gpio_config_t *board_gpio_config = get_board_gpio_config(i);
+        board_gpio_config->pin = 0;
+        board_gpio_config->function = NA;
+        board_gpio_config->alt_function = NA;
+      }
+
+      if (cJSON_GetArraySize(gpio) > 0) {
+
+        uint8_t gpio_id = 0;
+        cJSON_ArrayForEach(gpio_item, gpio) {
+
+          board_gpio_config_t *board_gpio_config = get_board_gpio_config(gpio_id);
+
+          cJSON *pin = cJSON_GetObjectItem(gpio_item, "pin");
+          if (cJSON_IsNumber(pin)) {
+            board_gpio_config->pin = pin->valueint;
+          }
+
+          cJSON *function = cJSON_GetObjectItem(gpio_item, "function");
+          if (cJSON_IsNumber(function)) {
+            board_gpio_config->function = function->valueint;
+          }
+
+          cJSON *alt_function = cJSON_GetObjectItem(gpio_item, "alt_function");
+          if (cJSON_IsNumber(alt_function)) {
+            board_gpio_config->alt_function = alt_function->valueint;
+          }
+        }
+      }
+    }
+
     /* auth ------------------------- */
     cJSON * user_json = cJSON_GetObjectItem(root, "auth");
     if (cJSON_IsObject(user_json)) {
@@ -844,7 +907,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
 
     cJSON_Delete(root);
 
-    char *response = success_response_json();
+    char *response = success_response_json(1);
     httpd_resp_send(req, response, strlen(response));
     free(response);
   }
@@ -856,7 +919,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req)
 static esp_err_t auth_post_handler(httpd_req_t *req)
 {
   bool user_valid = false;
-  int total_len = req->content_len;
+  size_t total_len = req->content_len;
 
   int cur_len = 0;
   char *buf = malloc(req->content_len + 1);
@@ -882,11 +945,6 @@ static esp_err_t auth_post_handler(httpd_req_t *req)
 
   char * string = NULL;
   string = cJSON_Print(root);
-  if (string == NULL)
-  {
-    printf("\n %s \n", string);
-  }
-
   free(string);
 
   /* load saved user */
@@ -921,10 +979,6 @@ static esp_err_t auth_post_handler(httpd_req_t *req)
     cJSON_AddItemToObject(json, "token", cJSON_CreateString(auth_token));
 
     response = cJSON_Print(json);
-    if (string == NULL)
-    {
-      fprintf(stderr, "Failed to print monitor.\n");
-    }
     cJSON_Delete(json);
 
     httpd_resp_send(req, response, strlen(response));
@@ -936,33 +990,6 @@ static esp_err_t auth_post_handler(httpd_req_t *req)
 
   free(buf);
   return ESP_OK;
-//  char*  buf;
-//  size_t buf_len;
-//  char* check;
-
-//  buf_len = httpd_req_get_hdr_value_len(req, "Authorization") + 1;
-//  if (buf_len > 1) {
-//    buf = malloc(buf_len);
-//    check=malloc(sizeof(WWW_USER_PASS_BASE64)+6);
-//    if (httpd_req_get_hdr_value_str(req, "Authorization", buf, buf_len) == ESP_OK) {
-//      sprintf(check,"Basic %s",WWW_USER_PASS_BASE64);
-//      if(!strncmp(buf,check,strlen(check))){
-//        ESP_LOGI(TAG, "%s", "OK");
-//        httpd_resp_set_status(req, "200 Ok");
-//        return 0;
-//      }else{
-//        ESP_LOGI(TAG, "%s", "NO");
-//        httpd_resp_set_status(req, "403 Forbidden");
-//      }
-//    }
-//    free(buf);
-//    free(check);
-//  }else{
-//    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=pippo");
-//    ESP_LOGI(TAG, "WWW-Authoicate:%s","culo");
-//    httpd_resp_set_status(req, "401 Unauthorized");
-//    ESP_LOGI(TAG, "401:%s","culo");
-//  }
 }
 
 /* This handler useful for test, enable CORS access */
@@ -973,13 +1000,75 @@ esp_err_t options_handler(httpd_req_t *req)
   return ESP_OK;
 }
 
+esp_err_t default_handler(httpd_req_t *req)
+{
+  char* host = NULL;
+  size_t buf_len = 0;
+  char *buf = malloc(req->content_len + 1);
+
+  ESP_LOGI(TAG, "%s", __FUNCTION__ );
+  ESP_LOGI(TAG, "URI %s", req->uri);
+
+  httpd_req_get_url_query_str(req, buf, buf_len);
+  if (buf_len > 1) {
+    ESP_LOGI(TAG, "uri query %s", buf);
+  }
+  free(buf);
+
+  for (int i = 0; i < 4; ++i) {
+    if(strcmp(req->uri, app_uri[i]) == 0)
+    {
+      ESP_LOGI(TAG, "app uri %s", app_uri[i]);
+
+      httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+      httpd_resp_send(req, (const char *)&HTML, HTML_SIZE);
+      return ESP_OK;
+    }
+  }
+
+
+  buf_len = httpd_req_get_hdr_value_len(req, "Host") + 1;
+  if (buf_len > 1) {
+    host = malloc(buf_len);
+    if(httpd_req_get_hdr_value_str(req, "Host", host, buf_len) != ESP_OK){
+      /* if something is wrong we just 0 the whole memory */
+      memset(host, 0x00, buf_len);
+    }
+    ESP_LOGI(TAG, "host %s", host);
+  }
+
+  if (host != NULL && strstr(host, "192.168.4") != NULL)
+  {
+    ESP_LOGI(TAG, "redirect to 192.168.4.1");
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1");
+    httpd_resp_send(req, NULL, 0);
+  }
+
+  free(host);
+  return ESP_OK;
+}
+
+/* Captive portal redirect */
+esp_err_t captive_handler(httpd_req_t *req)
+{
+  ESP_LOGI(TAG, "%s", __FUNCTION__ );
+  /* Captive Portal functionality */
+  /* 302 Redirect to IP of the access point */
+//  httpd_resp_set_status(req, "302 Found");
+//  httpd_resp_set_hdr(req, "Location", "http://192.168.4.1");
+  const char response[] = "<body>Success</body><script>window.location.replace('http://192.168.4.1');</script>";
+  httpd_resp_send(req, response, strlen(response));
+  return ESP_OK;
+}
+
 httpd_handle_t start_webserver(void)
 {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 16;
+  config.max_uri_handlers = 22;
   config.recv_wait_timeout = 30;
   config.send_wait_timeout = 60;
-//  config.uri_match_fn = httpd_uri_match_wildcard;
+  config.uri_match_fn = httpd_uri_match_wildcard;
 
   ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
 
@@ -996,7 +1085,7 @@ httpd_handle_t start_webserver(void)
     ESP_LOGI(TAG, "Registering URI handlers");
 
     /* Allow CORS */
-    httpd_uri_t global_options = {
+    static const httpd_uri_t global_options = {
         .uri      = "/*",
         .method   = HTTP_OPTIONS,
         .handler  = options_handler,
@@ -1004,15 +1093,43 @@ httpd_handle_t start_webserver(void)
     };
 
     /* Load Vue.js App */
-    httpd_uri_t get_home = {
+    static const httpd_uri_t get_home = {
         .uri      = "/",
         .method   = HTTP_GET,
         .handler  = home_get_handler,
         .user_ctx = NULL
     };
 
+    static const httpd_uri_t default_get = {
+        .uri      = "/*",
+        .method   = HTTP_GET,
+        .handler  = default_handler,
+        .user_ctx = NULL
+    };
+
+    static const httpd_uri_t get_hotspot_apple = {
+        .uri      = "/hotspot-detect.html",
+        .method   = HTTP_GET,
+        .handler  = captive_handler,
+        .user_ctx = NULL
+    };
+
+    static const httpd_uri_t get_hotspot_android = {
+        .uri      = "/generate_204",
+        .method   = HTTP_GET,
+        .handler  = captive_handler,
+        .user_ctx = NULL
+    };
+
+    static const httpd_uri_t get_hotspot_ms = {
+        .uri      = "/connecttest.txt",
+        .method   = HTTP_GET,
+        .handler  = captive_handler,
+        .user_ctx = NULL
+    };
+
     /* Favicon */
-    httpd_uri_t get_favicon = {
+    static const httpd_uri_t get_favicon = {
         .uri      = "/favicon.ico",
         .method   = HTTP_GET,
         .handler  = favicon_get_handler,
@@ -1020,7 +1137,7 @@ httpd_handle_t start_webserver(void)
     };
 
     /* Reboot device */
-    httpd_uri_t get_reboot = {
+    static const httpd_uri_t get_reboot = {
         .uri      = "/reboot",
         .method   = HTTP_GET,
         .handler  = reboot_get_handler,
@@ -1028,14 +1145,14 @@ httpd_handle_t start_webserver(void)
     };
 
     /* Restore initial configuration */
-    httpd_uri_t get_factory = {
+    static const httpd_uri_t get_factory = {
         .uri      = "/factory",
         .method   = HTTP_GET,
         .handler  = factory_get_handler,
         .user_ctx = NULL
     };
 
-    httpd_uri_t get_ota = {
+    static const httpd_uri_t get_ota = {
         .uri      = "/update",
         .method   = HTTP_GET,
         .handler  = ota_get_handler,
@@ -1043,7 +1160,7 @@ httpd_handle_t start_webserver(void)
     };
 
     /* HTTP upload firmware */
-    httpd_uri_t update_post = {
+    static const httpd_uri_t update_post = {
         .uri	  = "/upload",
         .method   = HTTP_POST,
         .handler  = upload_post_handler,
@@ -1051,15 +1168,15 @@ httpd_handle_t start_webserver(void)
     };
 
     /* Send current device status */
-    httpd_uri_t get_status = {
-        .uri      = "/status",
+    static const httpd_uri_t get_status = {
+        .uri      = "/api/status",
         .method   = HTTP_GET,
         .handler  = status_get_handler,
         .user_ctx = NULL
     };
 
     /* POST Light */
-    httpd_uri_t post_light = {
+    static const httpd_uri_t post_light = {
         .uri      = "/api/light",
         .method   = HTTP_POST,
         .handler  = light_post_handler,
@@ -1067,7 +1184,7 @@ httpd_handle_t start_webserver(void)
     };
 
     /* Get Schedule */
-    httpd_uri_t get_schedule = {
+    static const httpd_uri_t get_schedule = {
         .uri      = "/api/schedule",
         .method   = HTTP_GET,
         .handler  = schedule_get_handler,
@@ -1075,15 +1192,23 @@ httpd_handle_t start_webserver(void)
     };
 
     /* POST Schedule */
-    httpd_uri_t post_schedule = {
+    static const httpd_uri_t post_schedule = {
         .uri      = "/api/schedule",
         .method   = HTTP_POST,
         .handler  = schedule_post_handler,
         .user_ctx = NULL
     };
 
+    /* POST Schedule Status */
+    static const httpd_uri_t post_schedule_status = {
+      .uri      = "/api/schedule/status",
+      .method   = HTTP_POST,
+      .handler  = schedule_status_post_handler,
+      .user_ctx = NULL
+    };
+
     /* Get current device settings */
-    httpd_uri_t get_settings = {
+    static const httpd_uri_t get_settings = {
         .uri      = "/api/settings",
         .method   = HTTP_GET,
         .handler  = settings_get_handler,
@@ -1091,7 +1216,7 @@ httpd_handle_t start_webserver(void)
     };
 
     /* POST current device settings */
-    httpd_uri_t post_settings = {
+    static const httpd_uri_t post_settings = {
         .uri      = "/api/settings",
         .method   = HTTP_POST,
         .handler  = settings_post_handler,
@@ -1099,11 +1224,20 @@ httpd_handle_t start_webserver(void)
     };
 
     /* POST Auth data */
-    httpd_uri_t post_auth = {
+    static const httpd_uri_t post_auth = {
         .uri      = "/auth",
         .method   = HTTP_POST,
         .handler  = auth_post_handler,
         .user_ctx = NULL
+    };
+
+    /* WebSocket */
+    static const httpd_uri_t ws = {
+        .uri        = "/ws",
+        .method     = HTTP_GET,
+        .handler    = ws_handler,
+        .user_ctx   = NULL,
+        .is_websocket = true
     };
 
     httpd_register_uri_handler(server, &global_options);
@@ -1117,9 +1251,15 @@ httpd_handle_t start_webserver(void)
     httpd_register_uri_handler(server, &post_light);
     httpd_register_uri_handler(server, &get_schedule);
     httpd_register_uri_handler(server, &post_schedule);
+    httpd_register_uri_handler(server, &post_schedule_status);
     httpd_register_uri_handler(server, &get_settings);
     httpd_register_uri_handler(server, &post_settings);
     httpd_register_uri_handler(server, &post_auth);
+    httpd_register_uri_handler(server, &get_hotspot_apple);
+    httpd_register_uri_handler(server, &get_hotspot_android);
+    httpd_register_uri_handler(server, &get_hotspot_ms);
+    httpd_register_uri_handler(server, &ws);
+    httpd_register_uri_handler(server, &default_get);
 
     return server;
   }
@@ -1156,6 +1296,9 @@ char * get_status_json()
 {
   char * string = NULL;
   char time_string[32];
+  const esp_app_desc_t * app_description = esp_app_get_description();
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
   system_status_t * system_status = get_system_status();
   services_t * services = get_services();
 
@@ -1175,8 +1318,12 @@ char * get_status_json()
   cJSON_AddItemToObject(status, "wifiMode", cJSON_CreateString(system_status->wifi_mode));
   cJSON_AddItemToObject(status, "ipAddress", cJSON_CreateString(system_status->net_address));
   cJSON_AddItemToObject(status, "macAddress", cJSON_CreateString(system_status->mac));
-  cJSON_AddItemToObject(status, "firmware", cJSON_CreateString(FIRMWARE));
-  cJSON_AddItemToObject(status, "hardware", cJSON_CreateString(HARDWARE));
+  cJSON_AddItemToObject(status, "schedule_status", cJSON_CreateBool(get_schedule_status()));
+  cJSON_AddItemToObject(status, "hardware", cJSON_CreateString(chip_info.model == 2? "ESP32S2":"ESP32"));
+  cJSON_AddItemToObject(status, "sdk", cJSON_CreateString(app_description->idf_ver));
+  cJSON_AddItemToObject(status, "app", cJSON_CreateString(app_description->project_name));
+  cJSON_AddItemToObject(status, "app_version", cJSON_CreateString(app_description->version));
+  cJSON_AddItemToObject(status, "app_date", cJSON_CreateString(app_description->date));
 
   /* MQTT status */
   cJSON * mqtt_status = cJSON_CreateObject();
@@ -1270,59 +1417,6 @@ char * get_schedule_json()
   cJSON_AddItemToObject(root, "schedule", schedule);
 
   string = cJSON_Print(root);
-  if (string == NULL)
-  {
-    fprintf(stderr, "Failed to print schedule json.\n");
-  }
-
-  cJSON_Delete(root);
-  return string;
-}
-
-/* http://device.name/api/schedule_config
-  schedule_config: {
-    mode: 0,
-    rgb: true,
-    sunrise_hour: 10,
-    sunrise_minute: 0,
-    sunset_hour: 22,
-    sunset_minute: 0,
-    brightness: 100,
-    duty: [
-      10, 20, 10, 20, 20, 4, 10, 0
-    ]
-  }
-*/
-char * get_schedule_config_json()
-{
-  char *string = NULL;
-
-  cJSON *root = cJSON_CreateObject();
-
-  /* schedule config */
-  cJSON * schedule_config_json = cJSON_CreateObject();
-  schedule_config_t * schedule_config = get_schedule_config();
-  cJSON_AddItemToObject(schedule_config_json, "mode", cJSON_CreateNumber(schedule_config->mode));
-  cJSON_AddItemToObject(schedule_config_json, "rgb", cJSON_CreateBool(schedule_config->rgb));
-  cJSON_AddItemToObject(schedule_config_json, "sunrise_hour", cJSON_CreateNumber(schedule_config->sunrise_hour));
-  cJSON_AddItemToObject(schedule_config_json, "sunrise_minute", cJSON_CreateNumber(schedule_config->sunrise_minute));
-  cJSON_AddItemToObject(schedule_config_json, "sunset_hour", cJSON_CreateNumber(schedule_config->sunset_hour));
-  cJSON_AddItemToObject(schedule_config_json, "sunset_minute", cJSON_CreateNumber(schedule_config->sunset_minute));
-  cJSON_AddItemToObject(schedule_config_json, "brightness", cJSON_CreateNumber(schedule_config->brightness));
-  cJSON_AddItemToObject(schedule_config_json, "gamma", cJSON_CreateNumber(schedule_config->gamma));
-
-  cJSON *schedule_config_duty = cJSON_CreateArray();
-  for (int j = 0; j < MAX_LED_CHANNELS; ++j) {
-    cJSON_AddItemToArray(schedule_config_duty, cJSON_CreateNumber(schedule_config->duty[j]));
-  }
-  cJSON_AddItemToObject(schedule_config_json, "duty", schedule_config_duty);
-  cJSON_AddItemToObject(root, "schedule_config", schedule_config_json);
-
-  string = cJSON_Print(root);
-  if (string == NULL)
-  {
-    fprintf(stderr, "Failed to print schedule json.\n");
-  }
 
   cJSON_Delete(root);
   return string;
@@ -1335,6 +1429,8 @@ char * get_schedule_config_json()
       id: 0,
       color: '#DDEFFF',
       power: 50,
+      sync_group: 1,
+      state: 1,
       state: 1
     }],
     networks: [
@@ -1404,6 +1500,8 @@ char * get_settings_json()
     cJSON_AddItemToObject(led_item, "color", cJSON_CreateString(led_config->color));
     cJSON_AddItemToObject(led_item, "power", cJSON_CreateNumber(led_config->power));
     cJSON_AddItemToObject(led_item, "duty_max", cJSON_CreateNumber(led_config->duty_max));
+    cJSON_AddItemToObject(led_item, "sync_channel", cJSON_CreateBool(led_config->sync_channel));
+    cJSON_AddItemToObject(led_item, "sync_channel_group", cJSON_CreateNumber(led_config->sync_channel_group));
     cJSON_AddItemToObject(led_item, "state", cJSON_CreateNumber(led_config->state));
 
     cJSON_AddItemToArray(led_channels, led_item);
@@ -1497,7 +1595,11 @@ char * get_settings_json()
   cJSON_AddItemToObject(schedule_config_json, "sunrise_minute", cJSON_CreateNumber(schedule_config->sunrise_minute));
   cJSON_AddItemToObject(schedule_config_json, "sunset_hour", cJSON_CreateNumber(schedule_config->sunset_hour));
   cJSON_AddItemToObject(schedule_config_json, "sunset_minute", cJSON_CreateNumber(schedule_config->sunset_minute));
+  cJSON_AddItemToObject(schedule_config_json, "simple_mode_duration", cJSON_CreateNumber(schedule_config->simple_mode_duration));
   cJSON_AddItemToObject(schedule_config_json, "brightness", cJSON_CreateNumber(schedule_config->brightness));
+  cJSON_AddItemToObject(schedule_config_json, "use_sync", cJSON_CreateNumber(schedule_config->use_sync));
+  cJSON_AddItemToObject(schedule_config_json, "sync_group", cJSON_CreateNumber(schedule_config->sync_group));
+  cJSON_AddItemToObject(schedule_config_json, "sync_master", cJSON_CreateNumber(schedule_config->sync_master));
   cJSON_AddItemToObject(schedule_config_json, "gamma", cJSON_CreateNumber(schedule_config->gamma));
 
   cJSON *schedule_config_duty = cJSON_CreateArray();

@@ -16,7 +16,7 @@
 #include "buttons.h"
 
 static const char *TAG = "BUTTONS";
-static xQueueHandle xQueueButton = NULL;
+static QueueHandle_t xQueueButton = NULL;
 
 static void gpio_isr_handler(void *arg)
 {
@@ -38,7 +38,7 @@ static void task_buttons(void *arg)
 
   for (;;) {
     if (xQueueReceive(xQueueButton, &io_num, portMAX_DELAY)) {
-      ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
+      ESP_LOGI(TAG, "GPIO[%lu] intr, val: %d\n", io_num, gpio_get_level(io_num));
 
       /* button was released after press event */
       if (io_num == GPIO_NUM_0)
@@ -56,7 +56,7 @@ static void task_buttons(void *arg)
       if (io_num == GPIO_NUM_36)
       {
         if (gpio_get_level(GPIO_NUM_36) == 0) {
-          vTaskDelay(1000 / portTICK_RATE_MS);
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
 
         if (gpio_get_level(GPIO_NUM_36) == 0) {
@@ -73,7 +73,7 @@ static void task_buttons(void *arg)
       }
 #endif
 
-      vTaskDelay(200/portTICK_RATE_MS);
+      vTaskDelay(200/portTICK_PERIOD_MS);
     }
   }
 }
@@ -96,7 +96,7 @@ void init_buttons()
   gpio_set_intr_type(GPIO_NUM_36, GPIO_INTR_POSEDGE);
 #endif
 
-  ESP_LOGI(TAG, "[APP] free memory before start buttons event task %d bytes", esp_get_free_heap_size());
+  ESP_LOGI(TAG, "[APP] free memory before start buttons event task %lu bytes", esp_get_free_heap_size());
 
   /* create a queue to handle gpio event from isr */
   xQueueButton = xQueueCreate(1, sizeof(uint32_t));

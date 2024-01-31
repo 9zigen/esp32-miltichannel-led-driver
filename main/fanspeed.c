@@ -2,68 +2,76 @@
 // Created by Aleksey Volkov on 23.11.2020.
 //
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <esp_log.h>
 #include <esp_system.h>
 #include "string.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
-#include "driver/pcnt.h"
 
-#include "settings.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+
+#include <driver/gpio.h>
+#include <driver/rtc_io.h>
+#include <driver/pulse_cnt.h>
+
+#include "app_settings.h"
 #include "pwm.h"
 #include "adc.h"
 #include "fanspeed.h"
 
 static const char *TAG = "FANSPEED";
 
-TimerHandle_t xClearCounterTimer = NULL;
-int16_t counter = 0;
+esp_timer_handle_t calc_speed_timer;
+pcnt_unit_handle_t pcnt_unit = NULL;
+int counter = 0;
 
 /* reset retry counter and try to connect tu AP */
-void vClearCounterTimerCallback( TimerHandle_t pxTimer )
+void calc_speed_timer_callback(void* arg)
 {
   /* get current value */
-  pcnt_get_counter_value(PCNT_UNIT_0, &counter);
+  ESP_ERROR_CHECK(pcnt_unit_get_count(pcnt_unit, &counter));
 
   /* clear counter */
-  pcnt_counter_clear(PCNT_UNIT_0);
+  ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
+  ESP_ERROR_CHECK(esp_timer_start_once(calc_speed_timer, 2500000));
 }
 
 static void pcnt_init(void)
 {
-  /* Prepare configuration for the PCNT unit */
-  pcnt_config_t pcnt_config = {
-      // Set PCNT input signal and control GPIOs
-      .pulse_gpio_num = GPIO_NUM_26,
-      .ctrl_gpio_num = PCNT_PIN_NOT_USED,
-      .channel = PCNT_CHANNEL_0,
-      .unit = PCNT_UNIT_0,
-      // What to do on the positive / negative edge of pulse input?
-      .pos_mode = PCNT_COUNT_DIS,   // Count up on the positive edge
-      .neg_mode = PCNT_COUNT_INC,   // Keep the counter value on the negative edge
+  ESP_LOGI(TAG, "install pcnt unit");
+  pcnt_unit_config_t unit_config = {
+      .high_limit = 65535,
+      .low_limit = -1,
   };
-  /* Initialize PCNT unit */
-  pcnt_unit_config(&pcnt_config);
 
-  /* Configure and enable the input filter */
-  pcnt_set_filter_value(PCNT_UNIT_0, 100);
-  pcnt_filter_enable(PCNT_UNIT_0);
+  ESP_ERROR_CHECK(pcnt_new_unit(&unit_config, &pcnt_unit));
 
-  /* Enable events on zero, maximum and minimum limit values */
-  pcnt_event_enable(PCNT_UNIT_0, PCNT_EVT_ZERO);
-  pcnt_event_enable(PCNT_UNIT_0, PCNT_EVT_H_LIM);
-  pcnt_event_enable(PCNT_UNIT_0, PCNT_EVT_L_LIM);
+  ESP_LOGI(TAG, "set glitch filter");
+  pcnt_glitch_filter_config_t filter_config = {
+      .max_glitch_ns = 1000,
+  };
+  ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(pcnt_unit, &filter_config));
 
-  /* Initialize PCNT's counter */
-  pcnt_counter_pause(PCNT_UNIT_0);
-  pcnt_counter_clear(PCNT_UNIT_0);
+  ESP_LOGI(TAG, "install pcnt channels");
+  pcnt_chan_config_t chan_a_config = {
+      .edge_gpio_num = GPIO_NUM_5,
+      .level_gpio_num = -1,
+  };
+  pcnt_channel_handle_t pcnt_chan_a = NULL;
+  ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_a_config, &pcnt_chan_a));
 
-  /* Everything is set up, now go to counting */
-  pcnt_counter_resume(PCNT_UNIT_0);
+  ESP_LOGI(TAG, "set edge and level actions for pcnt channels");
+  ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan_a, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD));
+
+  ESP_LOGI(TAG, "clear pcnt unit");
+  ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
+  ESP_LOGI(TAG, "start pcnt unit");
+  ESP_ERROR_CHECK(pcnt_unit_start(pcnt_unit));
 }
 
 void fan_speed_init()
@@ -71,13 +79,13 @@ void fan_speed_init()
   /* Initialize PCNT */
   pcnt_init();
 
-  /* clear counter timer */
-  xClearCounterTimer = xTimerCreate( "ClearCounterTimer", ( 250 / portTICK_PERIOD_MS), pdTRUE, 0, vClearCounterTimerCallback);
-
-  if( xClearCounterTimer != NULL ) {
-    xTimerStart( xClearCounterTimer, 1000 / portTICK_RATE_MS);
-    ESP_LOGI(TAG, "xClearCounterTimer started");
-  }
+  /* calc speed/clear counter timer */
+  const esp_timer_create_args_t timer_args = {
+      .callback = &calc_speed_timer_callback,
+      .name = "calc_speed_timer"
+  };
+  ESP_ERROR_CHECK(esp_timer_create(&timer_args, &calc_speed_timer));
+  ESP_ERROR_CHECK(esp_timer_start_once(calc_speed_timer, 2500000));
 }
 
 /* RPM */

@@ -164,4 +164,12 @@
   .chart-legend {
     display: none;
   }
+  .mobile-scrollable {
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 46px;
+    position: relative;
+    display: flex;
+    flex-wrap: nowrap;
+  }
 }

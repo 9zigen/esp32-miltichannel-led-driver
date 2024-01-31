@@ -22,7 +22,7 @@
 #include "main.h"
 #include "board.h"
 #include "connect.h"
-#include "settings.h"
+#include "app_settings.h"
 
 static const char *TAG = "RTC";
 
@@ -44,7 +44,7 @@ static void initialize_sntp(services_t * config)
 
 static void obtain_time(void)
 {
-  xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, 1000 * 30 / portTICK_RATE_MS);
+  xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, false, true, 1000 * 30 / portTICK_PERIOD_MS);
 
   services_t * services = get_services();
 

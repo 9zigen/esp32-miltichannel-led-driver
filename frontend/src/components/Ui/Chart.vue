@@ -212,7 +212,7 @@ export default {
           this.firstRun = false
           this.startChart()
         } else {
-          this.update(this.data)
+          // this.update(this.data)
         }
       },
       deep: true
@@ -273,8 +273,8 @@ export default {
       this.chart.updateDataset(datasetValues, index)
     },
 
-    update (data) {
-      this.chart.update(data)
+    update () {
+      this.chart.update(this.data)
     },
 
     unbindWindowEvents () {

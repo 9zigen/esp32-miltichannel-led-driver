@@ -17,6 +17,6 @@ typedef struct {
 } system_status_t;
 
 system_status_t* get_system_status(void);
-void task_monitor(void *pvParameters);
+int init_monitor();
 
 #endif //HV_CC_LED_DRIVER_RTOS_MONITOR_H

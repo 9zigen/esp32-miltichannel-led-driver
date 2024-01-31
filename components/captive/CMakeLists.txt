@@ -1,0 +1,5 @@
+idf_build_get_property(project_dir PROJECT_DIR)
+set(COMPONENT_SRCS 	"captive_dns.c")
+set(COMPONENT_ADD_INCLUDEDIRS "./include")
+set(COMPONENT_REQUIRES esp_netif)
+register_component()

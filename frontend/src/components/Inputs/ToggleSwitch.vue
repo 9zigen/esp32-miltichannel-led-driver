@@ -39,6 +39,7 @@ export default {
     display: inline-block;
     width: 60px;
     height: 34px;
+    margin-top: 2px;
   }
 
   /* Hide default HTML checkbox */

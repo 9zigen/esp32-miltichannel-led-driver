@@ -6,11 +6,21 @@
 #define HV_CC_LED_DRIVER_RTOS_SETTINGS_H
 
 #include "stdbool.h"
+#include <esp_system.h>
+#include <driver/gpio.h>
+#include "board.h"
+
+/* Hardware */
+#define HARDWARE_MODEL "PICO D4 5CH LED DRIVER AIO"
+#define HARDWARE_MANUFACTURER "Alab"
+#define HARDWARE_VERSION "1.0"
 
 #define MAX_NETWORKS        2
 
 #if defined(PICO_D4_5CH_LED_DRIVER_AIO)
 #define MAX_LED_CHANNELS    5
+#define BOARD_GPIO_MAP { GPIO_NUM_25, GPIO_NUM_34, GPIO_NUM_35 }
+#define MAX_BOARD_GPIO 3
 #elif defined(CUSTOM_7CH_LED_DRIVER_AIO)
 #define MAX_LED_CHANNELS    7
 #else
@@ -19,9 +29,15 @@
 
 #define MAX_SCHEDULE        12
 #define MAX_BRIGHTNESS      100
-#define DUTY_STEPS          2048
 
-/* Hardware */
+/* The range of the duty cycle values passed to functions depends on selected duty_
+ * resolution and should be from 0 to (2 ** duty_resolution) - 1.
+ * For example, if the selected duty resolution is 10, then the duty cycle values
+ * can range from 0 to 1023. This provides the resolution of ~0.1%. */
+#define DUTY_STEPS          2047 /* 5kHz = 13 bits  */
+
+#define LED_SETTINGS_VERSION 0xA0
+#define SCHEDULE_CONFIG_SETTINGS_VERSION 0xA2
 
 
 typedef struct {
@@ -65,7 +81,10 @@ typedef struct {
   char color[8];                        // RGB CSS Hex value FFFFFF -> white
   uint16_t power;                       // Real Channel Power in Watts x 10 (0-65535) 100 = 10.0 in Web UI
   uint8_t duty_max;                     // MAX Channel duty
+  uint8_t sync_channel;                 // Enable/Disable channel sync
+  uint8_t sync_channel_group;           // Sync channel group
   uint8_t state;                        // Enable/Disable channel
+  uint8_t version;
 } led_t;
 
 typedef struct {
@@ -103,10 +122,26 @@ typedef struct {
   uint8_t  sunrise_minute;
   uint8_t  sunset_hour;
   uint8_t  sunset_minute;
+  uint8_t  simple_mode_duration;        // sunrise/sunset duration in minutes
   uint8_t  brightness;
   uint8_t  duty[MAX_LED_CHANNELS];      // Duty 0 - 255
+  uint8_t  use_sync;
+  uint8_t  sync_group;
+  uint8_t  sync_master;
   uint8_t  gamma;
+  uint8_t  version;
 } schedule_config_t;
+
+typedef enum {
+  NA = 0,
+  BRIGTNESS_UP, BRIGTNESS_DOWN, CHANGE_CHANNEL, APPLY
+} board_gpio_func_t;
+
+typedef struct {
+  uint8_t pin;
+  board_gpio_func_t function;
+  board_gpio_func_t alt_function;
+} board_gpio_config_t;
 
 void init_settings(void);
 void set_default_network(void);
@@ -116,6 +151,7 @@ void set_default_led(void);
 void set_default_schedule(void);
 void set_default_schedule_config(void);
 void set_default_cooling(void);
+void set_default_board_gpio_config(void);
 void set_default_auth(void);
 
 void set_network(void);
@@ -125,6 +161,7 @@ void set_led(void);
 void set_schedule(void);
 void set_schedule_config(void);
 void set_cooling(void);
+void set_board_gpio_config(void);
 void set_auth(void);
 
 void erase_settings(void);
@@ -136,6 +173,7 @@ led_t * get_leds(uint8_t led_id);
 schedule_t * get_schedule(uint8_t schedule_id);
 schedule_config_t * get_schedule_config();
 cooling_t * get_cooling();
+board_gpio_config_t * get_board_gpio_config(uint8_t id);
 auth_t * get_auth();
 
 void ip_to_string(uint8_t ip[4], char* string);

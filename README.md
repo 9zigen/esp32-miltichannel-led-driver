@@ -25,3 +25,6 @@ openssl s_client -showcerts -connect fw.alab.cc:443 </dev/null 2>/dev/null|opens
 3. reboot the device and connect to the access point
 4. configure WiFi on [http://192.168.4.1](http://192.168.4.1) 
 3. hold the "IO0" button after loading for 3 seconds. this will start the OTA sequence.
+
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/alab)

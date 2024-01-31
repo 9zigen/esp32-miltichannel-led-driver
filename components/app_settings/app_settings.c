@@ -12,20 +12,21 @@
 #include "nvs.h"
 
 #include "board.h"
-#include "settings.h"
+#include "app_settings.h"
 
-static const char *TAG = "SETTINGS";
-
-network_t network[MAX_NETWORKS];
-services_t service;
-thingsboard_t thingsboard;
-led_t led[MAX_LED_CHANNELS];
-schedule_t schedule[MAX_SCHEDULE];
-schedule_config_t schedule_config;
-cooling_t cooling;
-auth_t auth;
-
+static const char *TAG = "APP SETTINGS";
+const gpio_num_t board_gpio_map[MAX_BOARD_GPIO] = BOARD_GPIO_MAP;
 const char * empty_str = "empty";
+
+static network_t network[MAX_NETWORKS];
+static services_t service;
+static thingsboard_t thingsboard;
+static led_t led[MAX_LED_CHANNELS];
+static schedule_t schedule[MAX_SCHEDULE];
+static schedule_config_t schedule_config;
+static cooling_t cooling;
+static board_gpio_config_t board_gpio_config[MAX_BOARD_GPIO];
+static auth_t auth;
 
 /* Initialize Settings */
 void init_settings()
@@ -139,6 +140,14 @@ void init_settings()
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
     }
 
+    /* Check leds */
+    for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
+      if (led->version != LED_SETTINGS_VERSION) {
+        set_default_led();
+        break;
+      }
+    }
+
     /* Read Schedule */
     ESP_LOGI(TAG, "Reading Schedule ...");
     required_size = 0;  /* value will default to 0, if not set yet in NVS */
@@ -183,6 +192,11 @@ void init_settings()
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
     }
 
+    /* Check Schedule Config */
+    if (schedule_config.version != SCHEDULE_CONFIG_SETTINGS_VERSION) {
+      set_default_schedule_config();
+    }
+
     /* Read Cooling */
     ESP_LOGI(TAG, "Reading Cooling...");
     required_size = 0;  /* value will default to 0, if not set yet in NVS */
@@ -200,6 +214,28 @@ void init_settings()
       case ESP_ERR_NVS_NOT_FOUND:
         ESP_LOGE(TAG, "Cooling config config not initialized yet!");
         set_default_cooling();
+        break;
+      default :
+        ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
+    }
+
+    /* Read Board GPIO config */
+    ESP_LOGI(TAG, "Reading GPIO Config...");
+    required_size = 0;  /* value will default to 0, if not set yet in NVS */
+    err = nvs_get_blob(nvs_handle, "gpio_config", NULL, &required_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND && required_size == (sizeof(board_gpio_config_t) * MAX_BOARD_GPIO)) {
+      ESP_LOGE(TAG, "config not saved yet! error: %s", esp_err_to_name(err));
+      set_default_board_gpio_config();
+    } else {
+      err = nvs_get_blob(nvs_handle, "gpio_config", &board_gpio_config, &required_size);
+    }
+    switch (err) {
+      case ESP_OK:
+        ESP_LOGI(TAG, "Done Board GPIO config");
+        break;
+      case ESP_ERR_NVS_NOT_FOUND:
+        ESP_LOGE(TAG, "Board GPIO config config not initialized yet!");
+        set_default_board_gpio_config();
         break;
       default :
         ESP_LOGE(TAG, "Error (%s) reading!\n", esp_err_to_name(err));
@@ -412,10 +448,13 @@ void set_default_led()
 
   for(size_t i = 0; i < MAX_LED_CHANNELS; i++)
   {
-    led[i].id    = i; 
+    led[i].id    = i;
     led[i].power = 0;                             /* 0 ->  0->0 in Watts x 10 */
     led[i].state = 1;                             /* 0 ->  OFF | 1 -> ON */
+    led[i].sync_channel = 0;
+    led[i].sync_channel_group = i;
     led[i].duty_max = 255;
+    led[i].version = LED_SETTINGS_VERSION;
     strlcpy(led[i].color, default_colors[i], 8);  /* default color #B4D9F1 -> 'Cold White' in UI */
   }
 
@@ -510,14 +549,19 @@ void set_default_schedule_config()
   esp_err_t err;
   nvs_handle nvs_handle;
 
-  schedule_config.mode            = ADVANCED;
-  schedule_config.sunrise_hour    = 0;
-  schedule_config.sunrise_minute  = 0;
-  schedule_config.sunset_hour     = 0;
-  schedule_config.sunset_minute   = 0;
-  schedule_config.brightness      = 0;
-  schedule_config.rgb             = false;
-  schedule_config.gamma           = 100; /* gamma correction x100 */
+  schedule_config.mode                  = ADVANCED;
+  schedule_config.sunrise_hour          = 0;
+  schedule_config.sunrise_minute        = 0;
+  schedule_config.sunset_hour           = 0;
+  schedule_config.sunset_minute         = 0;
+  schedule_config.simple_mode_duration  = 30;
+  schedule_config.brightness            = 0;
+  schedule_config.rgb                   = false;
+  schedule_config.gamma                 = 100; /* gamma correction x100 */
+  schedule_config.use_sync              = 1;
+  schedule_config.sync_group            = 0;
+  schedule_config.sync_master           = 0;
+  schedule_config.version               = SCHEDULE_CONFIG_SETTINGS_VERSION;
 
   for(size_t i = 0; i < MAX_LED_CHANNELS; i++)
   {
@@ -583,6 +627,46 @@ void set_default_cooling()
       ESP_LOGE(TAG, "Failed to Update Cooling in NVS");
     } else {
       ESP_LOGI(TAG, "Done Default Cooling");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
+void set_default_board_gpio_config()
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+  for (int i = 0; i < MAX_BOARD_GPIO; ++i) {
+    board_gpio_config[i].pin = board_gpio_map[i];
+    board_gpio_config[i].function = NA;
+    board_gpio_config[i].alt_function = NA;
+  }
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating GPIO Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "gpio_config", &board_gpio_config,
+                       sizeof(board_gpio_config_t) * MAX_BOARD_GPIO);
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update GPIO Config in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done Default GPIO Config");
     }
   }
 
@@ -874,6 +958,41 @@ void set_cooling(void)
   nvs_close(nvs_handle);
 };
 
+void set_board_gpio_config(void)
+{
+  esp_err_t err;
+  nvs_handle nvs_handle;
+
+  /* Open Storage */
+  err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Error: unable to open the NVS partition");
+  } else {
+    /* Write */
+    ESP_LOGI(TAG, "Updating GPIO Config in NVS ...");
+    err = nvs_set_blob(nvs_handle, "gpio_config", &board_gpio_config,
+                       sizeof(board_gpio_config_t) * MAX_BOARD_GPIO);
+    if (err != ESP_OK)
+    {
+      ESP_LOGE(TAG, "Failed to Update GPIO Config in NVS");
+    } else {
+      ESP_LOGI(TAG, "Done New GPIO Config");
+    }
+  }
+
+  ESP_LOGI(TAG, "Committing updates in NVS ...");
+  err = nvs_commit(nvs_handle);
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Failed to commit NVS");
+  } else {
+    ESP_LOGI(TAG, "Done commit NVS");
+  }
+
+  /* Close */
+  nvs_close(nvs_handle);
+};
+
 void set_auth(void)
 {
   esp_err_t err;
@@ -958,11 +1077,18 @@ cooling_t * get_cooling(void)
   return &cooling;
 }
 
+board_gpio_config_t * get_board_gpio_config(uint8_t id)
+{
+  if (id >= MAX_BOARD_GPIO)
+    return &board_gpio_config[0];
+
+  return &board_gpio_config[id];
+}
+
 auth_t * get_auth(void)
 {
   return &auth;
 }
-
 
 void ip_to_string(uint8_t ip[4], char* string)
 {

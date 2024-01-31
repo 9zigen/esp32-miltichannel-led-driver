@@ -13,7 +13,7 @@
     <div class="columns is-marginless">
       <div class="column">
         <!-- MAIN -->
-        <div class="buttons has-addons">
+        <div class="buttons has-addons mobile-scrollable">
           <span
             v-for="(tab, idx) in tabs"
             v-bind:key="tab"
@@ -34,6 +34,7 @@
       v-bind:schedule-config="schedule_config"
       v-bind:device-time="time"
       v-bind:device-cooling="cooling"
+      v-bind:device-gpio="gpio"
     />
   </div>
 </template>
@@ -44,9 +45,10 @@ import TabMqtt from './components/Mqtt'
 import TabTime from './components/Time'
 import TabLeds from './components/Leds'
 import TabFan from './components/Fan'
+import TabGpio from './components/Gpio'
 import TabUser from './components/User'
-import { http } from '@/http'
 import { eventBus } from '@/eventBus'
+import { getSettings } from '@/apiService'
 
 export default {
   name: 'Settings',
@@ -56,18 +58,20 @@ export default {
     TabTime,
     TabLeds,
     TabFan,
+    TabGpio,
     TabUser
   },
   data () {
     return {
       currentTab: 'Main',
-      tabs: ['Main', 'Time', 'MQTT', 'Leds', 'Fan', 'User'],
-      icons: ['settings-icon', 'clock-icon', 'share-2-icon', 'sun-icon', 'wind-icon', 'user-icon'],
+      tabs: ['Main', 'Time', 'MQTT', 'Leds', 'Fan', 'Gpio', 'User'],
+      icons: ['settings-icon', 'clock-icon', 'share-2-icon', 'sun-icon', 'wind-icon', 'cpu-icon', 'user-icon'],
       services: {},
       leds: [],
       thingsboard: {},
       schedule_config: {},
       cooling: {},
+      gpio: [],
       time: {}
     }
   },
@@ -86,18 +90,27 @@ export default {
   methods: {
     async loadSettings () {
       /* Load all settings */
-      let settingsResponse = await http.get('/api/settings')
-      this.services = settingsResponse.data.services
-      this.leds = settingsResponse.data.leds
-      this.time = settingsResponse.data.time
-      this.thingsboard = settingsResponse.data.thingsboard
-      this.schedule_config = settingsResponse.data.schedule_config
-      this.cooling = settingsResponse.data.cooling
+      try {
+        const response = await getSettings()
+        this.services = response.data.services
+        this.leds = response.data.leds
+        this.time = response.data.time
+        this.thingsboard = response.data.thingsboard
+        this.schedule_config = response.data.schedule_config
+        this.cooling = response.data.cooling
+        this.gpio = response.data.gpio
 
-      /* remove Fan tab if device not support it */
-      if (!this.cooling) {
-        this.tabs = this.tabs.filter(tab => tab !== 'Fan')
-        this.icons = this.icons.filter(icon => icon !== 'wind-icon')
+        /* remove Fan tab if device not support it */
+        if (!this.cooling) {
+          this.tabs = this.tabs.filter(tab => tab !== 'Fan')
+          this.icons = this.icons.filter(icon => icon !== 'wind-icon')
+        }
+      } catch (e) {
+        if (e.response) {
+          eventBus.$emit('message', e.response.data.message, 'danger')
+        } else {
+          eventBus.$emit('message', 'unexpected error', 'danger')
+        }
       }
     },
     selectTab (id) {

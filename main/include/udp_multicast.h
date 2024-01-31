@@ -7,7 +7,11 @@
 
 #include "light.h"
 
-void udp_set_light(const double *target_duty, double target_brightness, transition_mode_t mode);
+typedef struct {
+
+} rx_packet_sync_t;
+
+void udp_set_light(const double *target_duty, double target_brightness);
 void mcast_udp_task(void *pvParameters);
 
 #endif //ESP32_CC_LED_DRIVER_RTOS_UDP_MULTICAST_H

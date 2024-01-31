@@ -29,7 +29,7 @@
 #include "esp_log.h"
 
 #include "main.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "thingsboard.h"
 
 #define TELEMETRY_TOPIC     "v1/devices/me/telemetry"        /* ThingsBoard MQTT telemetry topic */
@@ -121,7 +121,7 @@ void init_thingsboard()
     };
 
     /* Create device status publish timer, 1 min period */
-    timer_publish_telemetry = xTimerCreate("TimerDeviceTelemetry", 60 * 1000 / portTICK_RATE_MS, pdTRUE, NULL,
+    timer_publish_telemetry = xTimerCreate("TimerDeviceTelemetry", 60 * 1000 / portTICK_PERIOD_MS, pdTRUE, NULL,
                                            vTimerTelemetryCallback);
 
     ESP_LOGI(TAG, "[APP] free memory before start ThingBoard MQTT client: %d bytes", esp_get_free_heap_size());
@@ -149,7 +149,7 @@ void task_thingsboard(void *pvParameters)
     {
       vTaskDelete(NULL);
     }
-    vTaskDelay(200/portTICK_RATE_MS);
+    vTaskDelay(200/portTICK_PERIOD_MS);
   }
 }
 

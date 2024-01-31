@@ -1,3 +1,4 @@
+#include <sys/cdefs.h>
 /***
 ** Created by Aleksey Volkov on 22.12.2019.
 ***/
@@ -11,14 +12,14 @@
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <esp_err.h>
-#include <driver/ledc.h>
 #include <string.h>
 
 #include "board.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "mcp7940.h"
 #include "pwm.h"
 #include "udp_multicast.h"
+#include "app_events.h"
 #include "light.h"
 
 #define LEDC_FADE_TIME         (3000)
@@ -32,9 +33,7 @@ static const char *TAG = "LIGHT";
 /* current led channel state */
 volatile led_schedule_t channel[MAX_LED_CHANNELS] = {0};
 volatile double brightness = 0.0;
-volatile uint8_t schedule_was_started = false;
-volatile uint8_t brake_slow_transition = 0;
-volatile uint8_t stop_schedule = 0;
+volatile uint8_t schedule_running = 0;
 
 QueueHandle_t xQueueTransition;
 
@@ -118,19 +117,33 @@ const uint16_t gamma_1_80[256] = {
     1835,1849,1863,1877,1891,1905,1919,1933,1947,1961,1975,1990,2004,2018,2033,2047,
 };
 
-static int16_t minutes_left(uint8_t hour, uint8_t minute, uint8_t schedule_hour, uint8_t schedule_minute)
+static int seconds_left(uint8_t hour, uint8_t minute, uint8_t second, uint8_t schedule_hour, uint8_t schedule_minute)
 {
-  return (schedule_hour - hour) * 60 + schedule_minute - minute;
-}
+  /* next day time correction */
+  int diff_hours = (int)schedule_hour - (int)hour;
 
-static int32_t seconds_left(uint8_t hour, uint8_t minute, uint8_t second, uint8_t schedule_hour, uint8_t schedule_minute)
-{
-  return (schedule_hour - hour) * 3600 + (schedule_minute - minute) * 60 + (0 - second);
+  if (diff_hours < -12) {
+    diff_hours += 24;
+  } else if (diff_hours > 12) {
+    diff_hours -= 24;
+  }
+
+  ESP_LOGD(TAG, "diff: %d schedule_hour: %d hour: %d", diff_hours, schedule_hour, hour);
+
+  return diff_hours * 3600 + ((int)schedule_minute - (int)minute) * 60 + (0 - second);
 }
 
 uint8_t get_brightness()
 {
-  return brightness;
+  return (uint8_t)brightness;
+}
+
+uint8_t get_light_state()
+{
+    if (brightness > 0)
+        return 1;
+    else
+        return 0;
 }
 
 uint8_t get_channel_duty(uint8_t id)
@@ -138,7 +151,7 @@ uint8_t get_channel_duty(uint8_t id)
   if (id >= MAX_LED_CHANNELS)
     return 0;
 
-  return channel[id].current_duty;
+  return (uint8_t)channel[id].current_duty;
 }
 
 uint8_t get_channel_state(uint8_t id)
@@ -201,13 +214,10 @@ void set_channel_duty(uint8_t id, uint8_t duty, uint8_t not_sync)
 
   /* transition duration LEDC_FADE_TIME in ms. */
   txMessage.target_brightness = brightness;
-  txMessage.transition_mode = FAST;
   txMessage.fade_time = LEDC_FADE_TIME;
   txMessage.not_sync = not_sync;
 
-  /* send new queue */
-  brake_slow_transition = 1;
-  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
+  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_PERIOD_MS);
 }
 
 void set_brightness(uint8_t target_brightness, uint8_t not_sync)
@@ -222,17 +232,15 @@ void set_brightness(uint8_t target_brightness, uint8_t not_sync)
 
   /* transition duration LEDC_FADE_TIME in ms. */
   txMessage.target_brightness = target_brightness;
-  txMessage.transition_mode = FAST;
   txMessage.fade_time = LEDC_FADE_TIME;
   txMessage.not_sync = not_sync;
 
   /* send new queue */
-  brake_slow_transition = 1;
-  stop_schedule = 1;
-  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
+  schedule_running = 0;
+  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_PERIOD_MS);
 }
 
-void set_light(const double * target_duty, double target_brightness, uint8_t mode, uint8_t not_sync)
+void set_light(const double * target_duty, double target_brightness, uint8_t stop_schedule, uint8_t not_sync)
 {
   x_light_message_t txMessage;
   for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
@@ -247,17 +255,13 @@ void set_light(const double * target_duty, double target_brightness, uint8_t mod
 
   /* transition duration LEDC_FADE_TIME in ms. */
   txMessage.target_brightness = target_brightness;
-  txMessage.transition_mode = mode;
   txMessage.fade_time = LEDC_FADE_TIME;
   txMessage.not_sync = not_sync;
 
-  if (mode == FAST) {
-    brake_slow_transition = 1;
-    stop_schedule = 1;
-  }
+  schedule_running = !stop_schedule;
 
   /* send new queue */
-  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
+  xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_PERIOD_MS);
 }
 
 static void backup_channels()
@@ -292,7 +296,7 @@ static void restore_channels()
     for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
       duty[i] = mem.duty[i];
     }
-    set_light(duty, (double)mem.brightness, FAST, 0);
+    set_light(duty, (double)mem.brightness, 0, 0);
   }
 }
 
@@ -310,8 +314,18 @@ static double calc_interpolation(int x0, int y0, int x1, int y1, int xp)
   return y0 + ((double)(y1-y0)/(x1-x0)) * (xp - x0);
 }
 
+bool get_schedule_status()
+{
+  return schedule_running;
+}
+
+void set_schedule_status(uint8_t on)
+{
+  schedule_running = on ? 1 : 0;
+}
+
 /* main light control task */
-void task_light(void *pvParameter)
+_Noreturn void task_light(void *pvParameter)
 {
   time_t now;
   struct tm timeinfo;
@@ -320,27 +334,14 @@ void task_light(void *pvParameter)
   /* light transition queue */
   xQueueTransition = xQueueCreate( 10, sizeof( x_light_message_t ) );
 
-  schedule_config_t * schedule_config;
-
   time(&now);
   localtime_r(&now, &timeinfo);
 
-  /* demo firmware */
-//  if (timeinfo.tm_year != (2021 - 1900) && timeinfo.tm_mon != 5) {
-//    ESP_LOGI(TAG, "END DEMO TIME");
-//    vTaskDelete(NULL);
-//  }
-
   /* check if first boot */
   bool first_boot = true;
-  schedule_config = get_schedule_config();
-  if (schedule_config->mode != SIMPLE) {
-    for (int i = 0; i < MAX_SCHEDULE; ++i) {
-      schedule_t * schedule = get_schedule(i);
-      if (schedule->active) { first_boot = false; }
-    }
-  } else {
-    first_boot = false;
+  for (int i = 0; i < MAX_SCHEDULE; ++i) {
+    schedule_t * schedule = get_schedule(i);
+    if (schedule->active) { first_boot = false; }
   }
 
   /* power on 30% */
@@ -349,7 +350,7 @@ void task_light(void *pvParameter)
     for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
       duty[i] = 255.0;
     }
-    set_light(duty, 30.0, FAST, 0);
+    set_light(duty, 30.0, 1, 0);
     ESP_LOGW(TAG, "First boot: Brightness 0 -> 30");
   } else {
     /* load current pwm values from rtc */
@@ -362,151 +363,132 @@ void task_light(void *pvParameter)
     time(&now);
     localtime_r(&now, &timeinfo);
 
-    /* simple mode sunrise/sunset */
-    schedule_config = get_schedule_config();
-    if (schedule_config->mode == SIMPLE)
-    {
-      int sunrise_munutes_left = minutes_left(timeinfo.tm_hour, timeinfo.tm_min, schedule_config->sunrise_hour, schedule_config->sunrise_minute);
-      int sunset_munutes_left = minutes_left(timeinfo.tm_hour, timeinfo.tm_min, schedule_config->sunset_hour, schedule_config->sunset_minute);
+    /* advanced schedule ---> */
+    /* left side */
+    int nearest_left_side_sec = 0;
+    int min_left_side_distance_idx = -1;
 
-      /* Sunrise */
-      if (sunrise_munutes_left == 0 && !schedule_was_started) {
-        for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
-        {
-          /* max duty in % */
-          led_t * led = get_leds(i);
-          channel[i].power_factor = led->duty_max / 255.0;
+    /* right side */
+    int nearest_right_side_sec = 0;
+    int min_right_side_distance_idx = -1;
 
-          /* prepare new queue message */
-          txMessage.target_duty[i] = schedule_config->duty[i];
-        }
-      }
+    bool skip_interpolation = false;
 
-      /* Sunset */
-      else if (sunset_munutes_left == 0 && !schedule_was_started) {
-        for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
-        {
-          /* prepare new queue message */
-          txMessage.target_duty[i] = 0;
-        }
-      }
+    for (int j = 0; j < MAX_SCHEDULE; ++j) {
+      schedule_t *_schedule = get_schedule(j);
 
-      /* Run */
-      if ((sunrise_munutes_left == 0 || sunset_munutes_left == 0) && !schedule_was_started) {
-        schedule_was_started = 1;
-        /* transition duration LEDC_FADE_TIME in ms. */
-        txMessage.target_brightness = schedule_config->brightness;
-        txMessage.transition_mode = SLOW;
-        txMessage.fade_time = LEDC_FADE_TIME;
-        txMessage.not_sync = 0;
+      ESP_LOGD(TAG, "SCHEDULE: %d time: %u:%u", j, _schedule->time_hour, _schedule->time_minute);
+      /* only enable schedule process */
+      if (_schedule->active) {
+        int sec_left = seconds_left(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, _schedule->time_hour, _schedule->time_minute);
 
-        /* send new queue */
-        xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
-      }
+        /* start light transition */
+        if (sec_left == 0) {
+          /* reset flag, previously settled by manual control */
+          schedule_running = 1;
 
-    } else {
-      /* advanced schedule ---> */
-      /* left side */
-      int nearest_left_side_sec = 0;
-      int min_left_side_distance_idx = -1;
+          for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
+          {
+            /* max duty in % */
+            led_t * led = get_leds(i);
+            channel[i].power_factor = led->duty_max / 255.0;
 
-      /* right side */
-      int nearest_right_side_sec = 0;
-      int min_right_side_distance_idx = -1;
-
-      for (int j = 0; j < MAX_SCHEDULE; ++j) {
-        schedule_t *_schedule = get_schedule(j);
-
-        /* only enable schedule process */
-        if (_schedule->active) {
-          int sec_left = seconds_left(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, _schedule->time_hour, _schedule->time_minute);
-
-          /* start light transition */
-          if (sec_left == 0) {
-            /* reset flag, previously setted by manual control */
-            stop_schedule = 0;
-
-            for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
-            {
-              /* max duty in % */
-              led_t * led = get_leds(i);
-              channel[i].power_factor = led->duty_max / 255.0;
-
-              /* prepare new queue message */
-              txMessage.target_duty[i] = _schedule->duty[i];
-            }
-
-            /* transition duration LEDC_FADE_TIME in ms. */
-            txMessage.target_brightness = _schedule->brightness;
-            txMessage.transition_mode = FAST;
-            txMessage.fade_time = 600;
-            txMessage.not_sync = 0;
-
-            /* send new queue */
-            xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
+            /* prepare new queue message */
+            txMessage.target_duty[i] = _schedule->duty[i];
           }
 
-          /* left side */
-          if (sec_left < 0) {
-            if (nearest_left_side_sec == 0 || sec_left > nearest_left_side_sec) {
-              nearest_left_side_sec = sec_left;
-              min_left_side_distance_idx = j;
-            }
-          }
-          ESP_LOGD(TAG, "LEFT SIDE left: %d, idx %d", sec_left, min_left_side_distance_idx);
+          /* transition duration LEDC_FADE_TIME in ms. */
+          txMessage.target_brightness = _schedule->brightness;
+          txMessage.fade_time = 600;
+          txMessage.not_sync = 0;
 
-          /* right side */
-          if (sec_left > 0) {
-            if (nearest_right_side_sec == 0 || sec_left < nearest_right_side_sec) {
-              nearest_right_side_sec = sec_left;
-              min_right_side_distance_idx = j;
-            }
-          }
-          ESP_LOGD(TAG, "RIGHT SIDE left: %d, idx %d", sec_left, min_right_side_distance_idx);
+          /* send new queue */
+          xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_PERIOD_MS);
+
+          /* Prevent brightness glitch */
+          skip_interpolation = true;
+
+          ESP_LOGD(TAG, "new point task: br [%f] ch [%f %f %f %f %f]", txMessage.target_brightness,
+                   txMessage.target_duty[0], txMessage.target_duty[1], txMessage.target_duty[2],
+                   txMessage.target_duty[3], txMessage.target_duty[4]);
         }
-      }
-      ESP_LOGD(TAG, "LEFT SIDE SELECTED idx %d", min_left_side_distance_idx);
-      ESP_LOGD(TAG, "RIGHT SIDE SELECTED idx %d", min_right_side_distance_idx);
 
-      if (!stop_schedule) {
-        /* calc interpolation
+        /* left side */
+        if (sec_left < 0) {
+          if (nearest_left_side_sec == 0 || sec_left > nearest_left_side_sec) {
+            nearest_left_side_sec = sec_left;
+            min_left_side_distance_idx = j;
+          }
+        }
+        ESP_LOGD(TAG, "before left: %d, min idx %d", sec_left, min_left_side_distance_idx);
+
+        /* right side */
+        if (sec_left > 0) {
+          if (nearest_right_side_sec == 0 || sec_left < nearest_right_side_sec) {
+            nearest_right_side_sec = sec_left;
+            min_right_side_distance_idx = j;
+          }
+        }
+        ESP_LOGD(TAG, "after left: %d, min idx %d", sec_left, min_right_side_distance_idx);
+      }
+    }
+    ESP_LOGD(TAG, "LEFT SIDE SELECTED idx %d", min_left_side_distance_idx);
+    ESP_LOGD(TAG, "RIGHT SIDE SELECTED idx %d", min_right_side_distance_idx);
+
+    if (schedule_running && !skip_interpolation) {
+      /* calc interpolation
       ** yp = y0 + ((y1-y0)/(x1-x0)) * (xp - x0); */
-        if (min_left_side_distance_idx > -1 && min_right_side_distance_idx > -1) {
-          /* get nearest schedule point */
-          if (min_left_side_distance_idx < MAX_SCHEDULE && min_right_side_distance_idx < MAX_SCHEDULE) {
-            schedule_t *ls_schedule = get_schedule(min_left_side_distance_idx);
-            schedule_t *rs_schedule = get_schedule(min_right_side_distance_idx);
+      if (min_left_side_distance_idx > -1 && min_right_side_distance_idx > -1) {
+        /* get nearest schedule point */
+        if (min_left_side_distance_idx < MAX_SCHEDULE && min_right_side_distance_idx < MAX_SCHEDULE) {
+          schedule_t *ls_schedule = get_schedule(min_left_side_distance_idx);
+          schedule_t *rs_schedule = get_schedule(min_right_side_distance_idx);
 
-            int ls_point = ls_schedule->time_hour * 3600 + ls_schedule->time_minute * 60;
-            int rs_point = rs_schedule->time_hour * 3600 + rs_schedule->time_minute * 60;
-            int current_point = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
-            ESP_LOGD(TAG, "time points %d --> %d ---> %d", ls_point, current_point, rs_point);
+          int ls_point = ls_schedule->time_hour * 3600 + ls_schedule->time_minute * 60;
+          int rs_point = rs_schedule->time_hour * 3600 + rs_schedule->time_minute * 60;
+          int current_point = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
+          ESP_LOGD(TAG, "time points %d --> %d ---> %d", ls_point, current_point, rs_point);
 
-            for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
-            {
-              /* max duty in % */
-              led_t * led = get_leds(i);
-              channel[i].power_factor = led->duty_max / 255.0;
-
-              /* prepare new queue message */
-              txMessage.target_duty[i] = calc_interpolation(ls_point, ls_schedule->duty[i], rs_point, rs_schedule->duty[i], current_point);
-            }
-
-            /* transition duration LEDC_FADE_TIME in ms. */
-            txMessage.target_brightness = calc_interpolation(ls_point, ls_schedule->brightness, rs_point, rs_schedule->brightness, current_point);
-            txMessage.transition_mode = FAST;
-            txMessage.fade_time = 600;
-            txMessage.not_sync = 0;
-
-            /* send new queue */
-            xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_RATE_MS);
+          /* subtract 24 hours, if point in prev day */
+          if (ls_point > rs_point) {
+            ls_point -= 24 * 3600;
           }
+          ESP_LOGD(TAG, "corr time points %d --> %d ---> %d", ls_point, current_point, rs_point);
+
+          for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
+          {
+            /* max duty in % */
+            led_t * led = get_leds(i);
+            channel[i].power_factor = led->duty_max / 255.0;
+
+            /* prepare new queue message */
+            txMessage.target_duty[i] = calc_interpolation(ls_point, ls_schedule->duty[i], rs_point, rs_schedule->duty[i], current_point);
+          }
+
+          /* transition duration LEDC_FADE_TIME in ms. */
+          txMessage.target_brightness = calc_interpolation(ls_point, ls_schedule->brightness, rs_point, rs_schedule->brightness, current_point);
+          txMessage.fade_time = 600;
+          txMessage.not_sync = 0;
+
+          /* send new queue */
+          xQueueSendToBack(xQueueTransition, &txMessage, 100/portTICK_PERIOD_MS);
+
+          ESP_LOGD(TAG, "new interpolation task: br [%f] ch [%f %f %f %f %f]", txMessage.target_brightness,
+                   txMessage.target_duty[0], txMessage.target_duty[1], txMessage.target_duty[2],
+                   txMessage.target_duty[3], txMessage.target_duty[4]);
         }
       }
+    } else {
+      ESP_LOGD(TAG, "schedule stopped");
+    }
+
+    if (skip_interpolation) {
+      ESP_LOGD(TAG, "skip_interpolation");
     }
 
     /* 900 msec. delay */
-    vTaskDelay(900 / portTICK_RATE_MS);
+    vTaskDelay(900 / portTICK_PERIOD_MS);
+    skip_interpolation = false;
   }
 }
 
@@ -533,7 +515,6 @@ uint16_t gamma_correction(uint8_t value, uint8_t gamma) {
 /* Update channel state, color transition process schedule end manual changed */
 void task_light_transition(void *pvParameter)
 {
-  double steps_left;
   double difference;
   double target_real_duty;
   x_light_message_t rxMessage;
@@ -548,169 +529,57 @@ void task_light_transition(void *pvParameter)
         schedule_config_t * schedule_config = get_schedule_config();
 
         ESP_LOGD(TAG, "new queue --------- ");
-        ESP_LOGD(TAG, "transition_mode: %d", rxMessage.transition_mode);
         ESP_LOGD(TAG, "brightness: %f -> %f", brightness, rxMessage.target_brightness);
         ESP_LOGD(TAG, "gamma: %d", schedule_config->gamma);
-
-        /* transition steps counter */
-        steps_left = 0;
-        double max_diff = 0;
 
         /* sync lights */
         if (!rxMessage.not_sync) {
           double sync_duty[MAX_LED_CHANNELS];
-          for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i) {
+          for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
+          {
             sync_duty[i] = rxMessage.target_duty[i];
           }
-          udp_set_light(sync_duty, rxMessage.target_brightness, rxMessage.transition_mode);
+          udp_set_light(sync_duty, rxMessage.target_brightness);
         }
 
-        for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i) {
+        for (int j = 0; j < MAX_LED_CHANNELS; ++j) {
+
           /* calc target duty on end of transition */
           if (schedule_config->gamma == GAMMA_1_00) {
-            target_real_duty = rxMessage.target_duty[i] / 255.0 * DUTY_STEPS;
+            target_real_duty = rxMessage.target_duty[j] / 255.0 * DUTY_STEPS;
           } else {
-            target_real_duty = gamma_correction(rxMessage.target_duty[i], schedule_config->gamma);
+            target_real_duty = gamma_correction((uint8_t)rxMessage.target_duty[j], schedule_config->gamma);
           }
 
           /* brightness adjust */
           target_real_duty = target_real_duty * rxMessage.target_brightness / MAX_BRIGHTNESS;
-          difference = fabs(target_real_duty - channel[i].real_duty);
+          difference = fabs(target_real_duty - channel[j].real_duty);
 
-          ESP_LOGD(TAG, "\t CH: %d Duty: %f Real: %f -> %f (%f)",
-                   i, channel[i].current_duty, channel[i].real_duty, target_real_duty, difference);
+          /* update current channel values */
+          channel[j].current_duty = rxMessage.target_duty[j];
+          channel[j].real_duty = target_real_duty;
 
-          /* save maximum available duty delta */
-          if (difference > max_diff) {
-            max_diff = difference;
+          /* power factor */
+          double real_duty = channel[j].real_duty * channel[j].power_factor;
+
+          ESP_LOGD(TAG, "\t power factor: %f LEDC %f -> %f",
+                   channel[j].power_factor, target_real_duty, real_duty);
+
+          /* fast transition by UI or MQTT */
+          if (difference > 10) {
+            ledc_fade_ms(j, (uint32_t)real_duty, 3000);
+          } else {
+            ledc_set(j, (uint32_t)real_duty);
           }
         }
 
-        /* nothing to change skip all */
-        if (max_diff == 0) {
-          steps_left = 0;
-        }
+        /* update current brightness */
+        brightness = rxMessage.target_brightness;
 
-        /* calc right step count; 600: 10 min. transition */
-        else if (max_diff > 0 && max_diff < 1800) {
-          steps_left = (uint32_t) max_diff;
-        }
-        else {
-          steps_left = 1800;
-        }
-
-        ESP_LOGD(TAG, "\t Calculated steps count: %f", steps_left);
-
-        /* RUN schedule transition */
-        if (rxMessage.transition_mode == SLOW) {
-          while (steps_left > 0) {
-            /* check brake flag */
-            if (brake_slow_transition) {
-              steps_left = 0;
-            } else {
-              for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i) {
-
-                /* Calc New Current Duty */
-                if (channel[i].current_duty != rxMessage.target_duty[i]) {
-                  difference = (rxMessage.target_duty[i] - channel[i].current_duty) / steps_left;
-                  channel[i].current_duty = fabs(channel[i].current_duty + difference);
-                }
-
-                /* Calc New Brightness */
-                if (brightness != rxMessage.target_brightness) {
-                  difference = (rxMessage.target_brightness - brightness) / steps_left;
-                  brightness = fabs(brightness + difference);
-                  ESP_LOGD(TAG, "\t CH: %d Brightness: %f -> %f (%f)", i, brightness, rxMessage.target_brightness, difference);
-                }
-
-                /* Calc New Real Duty, brightness & gamma compensated */
-                if (schedule_config->gamma == GAMMA_1_00) {
-                  target_real_duty = channel[i].current_duty / 255.0 * DUTY_STEPS;
-                } else {
-                  target_real_duty = gamma_correction(channel[i].current_duty, schedule_config->gamma);
-                }
-
-                /* brightness adjust */
-                target_real_duty = target_real_duty * brightness / MAX_BRIGHTNESS;
-
-                /* Brightness / Duty changed */
-                if (channel[i].real_duty != target_real_duty) {
-                  difference = fabs(target_real_duty - channel[i].real_duty);
-
-                  ESP_LOGD(TAG, "\t CH: %d LEDC %f -> %f (%f) steps left: %f",
-                           i, channel[i].real_duty, target_real_duty, difference, steps_left);
-
-                  channel[i].real_duty = target_real_duty;
-
-                  /* power factor */
-                  double real_duty = channel[i].real_duty * channel[i].power_factor;
-
-                  if (difference > 2 && difference <= 1023) {
-                    ledc_fade(i, (uint32_t)real_duty, (uint32_t) difference);
-                  } else if (difference > 2) {
-                    ledc_fade_ms(i, (uint32_t)real_duty, 1000);
-                  } else {
-                    ledc_set(i, (uint32_t)real_duty);
-                  }
-                }
-              }
-
-              steps_left--;
-              vTaskDelay(1000 / portTICK_RATE_MS);
-            }
-          }
-        }
-
-        /* check brake flag */
-        if (rxMessage.transition_mode == SLOW && brake_slow_transition) {
-          ESP_LOGD(TAG, "queue braked!");
-        } else {
-          /* end transition: step 0 */
-          for (int j = 0; j < MAX_LED_CHANNELS; ++j) {
-
-            /* calc target duty on end of transition */
-            if (schedule_config->gamma == GAMMA_1_00) {
-              target_real_duty = rxMessage.target_duty[j] / 255.0 * DUTY_STEPS;
-            } else {
-              target_real_duty = gamma_correction(rxMessage.target_duty[j], schedule_config->gamma);
-            }
-
-            /* brightness adjust */
-            target_real_duty = target_real_duty * rxMessage.target_brightness / MAX_BRIGHTNESS;
-            difference = fabs(target_real_duty - channel[j].real_duty);
-
-            /* update current channel values */
-            channel[j].current_duty = rxMessage.target_duty[j];
-            channel[j].real_duty = target_real_duty;
-
-            /* power factor */
-            double real_duty = channel[j].real_duty * channel[j].power_factor;
-
-            ESP_LOGD(TAG, "\t power factor: %f LEDC %f -> %f",
-                     channel[j].power_factor, target_real_duty, real_duty);
-
-            /* fast transition by UI or MQTT */
-            if (rxMessage.transition_mode == FAST && difference > 10) {
-              ledc_fade_ms(j, (uint32_t)real_duty, 3000);
-            } else {
-              ledc_set(j, (uint32_t)real_duty);
-            }
-          }
-
-          /* update current brightness */
-          brightness = rxMessage.target_brightness;
-
-          /* reset schedule start flag */
-          schedule_was_started = 0;
-
-          ESP_LOGD(TAG, "queue done!");
-        }
+        notify_app(LIGHT_CHANGE_EVENT, NULL, 0);
 
         /* Backup PWM in RTC */
         backup_channels();
-
-        /* reset brake flag */
-        brake_slow_transition = 0;
       }
     }
   }

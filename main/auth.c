@@ -2,14 +2,14 @@
 // Created by Aleksey Volkov on 25.11.2020.
 //
 #include <stdio.h>
-#include <esp_log.h>
-#include <esp_system.h>
-#include <fanspeed.h>
 #include <mbedtls/md.h>
 #include "string.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include "esp_log.h"
 #include "esp_system.h"
+#include "esp_random.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32S2
 #include "esp_hmac.h"
@@ -23,7 +23,7 @@ void generateToken(char *token_str)
 {
 #ifdef CONFIG_IDF_TARGET_ESP32
   char payload[32];
-  snprintf(payload, 32, "LED_%d", esp_random());
+  snprintf(payload, 32, "LED_%lu", esp_random());
 
   for(int i= 0; i< sizeof(payload); i++){
 //    printf("%02x", (int)payload[i]);

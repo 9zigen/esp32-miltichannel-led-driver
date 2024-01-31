@@ -9,7 +9,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 
-#define FIRMWARE "1.10"
+#define FIRMWARE "1.11"
 #define HARDWARE "ESP32-PICO-D4"
 
 /* Root cert for io.alab.cc, taken from io_alab_cc.pem
@@ -26,8 +26,6 @@
 /* MQTTS */
 //extern const uint8_t mqtt_server_cert_pem_start[] asm("_binary_mqtt_io_alab_cc_pem_start");
 //extern const uint8_t mqtt_server_cert_pem_end[] asm("_binary_mqtt_io_alab_cc_pem_end");
-
-extern EventGroupHandle_t wifi_event_group;
 
 esp_err_t upgrade_firmware();
 

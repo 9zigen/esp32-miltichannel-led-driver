@@ -55,7 +55,7 @@ app.get('/', function (req, res) {
 });
 
 /* On-lne Status */
-app.get('/status', function (req, res) {
+app.get('/api/status', function (req, res) {
   let token = req.headers["authorization"];
   if (!token || token === 'undefined') {
     return res.status(401).send({
@@ -92,8 +92,14 @@ app.get('/api/schedule', function (req, res) {
 });
 
 app.post('/api/schedule', function (req, res) {
-  console.log(req.body);
-  schedule = req.body.schedule
+  if (req.body.schedule) {
+    schedule = req.body.schedule
+  }
+  res.send(JSON.stringify({success: true}));
+});
+
+app.post('/api/schedule/status', function (req, res) {
+  status.schedule_status = req.body.status
   res.send(JSON.stringify({success: true}));
 });
 
@@ -107,6 +113,7 @@ app.get('/api/settings', function (req, res) {
     schedule_config: scheduleConfig,
     time: time,
     cooling: cooling,
+    gpio: gpioConfig,
     auth: auth
   }));
 });
@@ -141,6 +148,12 @@ app.post('/api/settings', function (req, res) {
   res.send(JSON.stringify({success: true}));
 });
 
+/* Gpio */
+app.get('/api/gpio', function (req, res) {
+  res.send(JSON.stringify({
+    gpioFunctions: gpioFunctions
+  }));
+});
 app.post('/auth', jsonParser, function(req, res) {
   if (!req.body) return res.sendStatus(400);
 
@@ -232,6 +245,8 @@ let leds = [
     color: '#FB647A',
     duty_max: 255,
     power: 50,
+    sync_channel: 0,
+    sync_channel_group: 0,
     state: 1
   },
   {
@@ -239,6 +254,8 @@ let leds = [
     color: '#6EB96E',
     duty_max: 255,
     power: 30,
+    sync_channel: 1,
+    sync_channel_group: 0,
     state: 1
   },
   {
@@ -246,6 +263,8 @@ let leds = [
     color: '#42B8F3',
     duty_max: 255,
     power: 40,
+    sync_channel: 1,
+    sync_channel_group: 1,
     state: 1
   },
   {
@@ -253,6 +272,8 @@ let leds = [
     color: '#b4d9f1',
     duty_max: 255,
     power: 40,
+    sync_channel: 0,
+    sync_channel_group: 1,
     state: 1
   },
   {
@@ -260,6 +281,8 @@ let leds = [
     color: '#b4d9f1',
     duty_max: 255,
     power: 40,
+    sync_channel: 1,
+    sync_channel_group: 2,
     state: 1
   },
   {
@@ -267,6 +290,8 @@ let leds = [
     color: '#b4d9f1',
     duty_max: 255,
     power: 40,
+    sync_channel: 1,
+    sync_channel_group: 1,
     state: 1
   },
   {
@@ -274,6 +299,8 @@ let leds = [
     color: '#b4d9f1',
     duty_max: 255,
     power: 40,
+    sync_channel: 1,
+    sync_channel_group: 1,
     state: 1
   },
   {
@@ -281,6 +308,8 @@ let leds = [
     color: '#b4d9f1',
     duty_max: 255,
     power: 0,
+    sync_channel: 1,
+    sync_channel_group: 1,
     state: 1
   }
 ];
@@ -293,12 +322,51 @@ let scheduleConfig = {
   sunrise_minute: 0,
   sunset_hour: 22,
   sunset_minute: 0,
+  simple_mode_duration: 30, /* sunrise/sunset duration in minutes */
   brightness: 100,
   gamma: 100,
+  use_sync: 1,
+  sync_group: 0,
   duty: [
     10, 20, 10, 20, 20, 4, 10, 0
   ]
 }
+
+/* ToDo pin config */
+const GPIO_FUNC = {
+  NA: 0,
+  BRIGTNESS_UP: 1,
+  BRIGTNESS_DOWN: 1,
+  CHANGE_CHANNEL: 2,
+  APPLY: 3
+}
+
+/* Board specific external port gpio */
+const gpioFunctions = [
+  { text: 'Empty', value: GPIO_FUNC.NA },
+  { text: 'Increase Brightness', value: GPIO_FUNC.BRIGTNESS_UP },
+  { text: 'Decrease Brightness', value: GPIO_FUNC.BRIGTNESS_DOWN },
+  { text: 'Change Channel', value: GPIO_FUNC.CHANGE_CHANNEL },
+  { text: 'Apply', value: GPIO_FUNC.CHANGE_CHANNEL }
+];
+
+let gpioConfig = [
+  {
+    pin: 25,
+    function: GPIO_FUNC.NA,
+    alt_function: GPIO_FUNC.NA
+  },
+  {
+    pin: 34,
+    function: GPIO_FUNC.NA,
+    alt_function: GPIO_FUNC.NA
+  },
+  {
+    pin: 35,
+    function: GPIO_FUNC.NA,
+    alt_function: GPIO_FUNC.NA
+  },
+];
 
 let schedule = [
   {
@@ -350,7 +418,12 @@ let status = {
   ntpService: { "enabled": true, "sync": true },
   brightness: 90,
   channels: [50, 255, 100, 20, 20, 0, 10, 5],
-  firmware: "1.1"
+  schedule_status: true,
+  hardware: "ESP32",
+  sdk: "",
+  app: "",
+  app_version: "",
+  app_date: ""
 };
 
 let time = {

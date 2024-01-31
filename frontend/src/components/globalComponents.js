@@ -1,5 +1,6 @@
-import { PlayIcon, CheckIcon, XIcon, PlusIcon, ClockIcon, TrelloIcon, SettingsIcon, InfoIcon,
-  WifiIcon, CopyIcon, SunriseIcon, SunsetIcon, LogInIcon, Share2Icon, WindIcon, SunIcon, UserIcon } from 'vue-feather-icons'
+import { PlayIcon, PauseIcon, CheckIcon, XIcon, PlusIcon, ClockIcon, TrelloIcon, SettingsIcon, InfoIcon,
+  WifiIcon, CopyIcon, SunriseIcon, SunsetIcon, LogInIcon, Share2Icon, WindIcon, SunIcon,
+  UserIcon, CpuIcon } from 'vue-feather-icons'
 import Chart from './Ui/Chart'
 import ScheduleChart from '@/components/Ui/ScheduleChart'
 import ToggleSwitch from '@/components/Inputs/ToggleSwitch'
@@ -18,6 +19,7 @@ export default {
 
     /* feather-icons */
     Vue.component('PlayIcon', PlayIcon)
+    Vue.component('PauseIcon', PauseIcon)
     Vue.component('CheckIcon', CheckIcon)
     Vue.component('XIcon', XIcon)
     Vue.component('PlusIcon', PlusIcon)
@@ -34,5 +36,6 @@ export default {
     Vue.component('WindIcon', WindIcon)
     Vue.component('SunIcon', SunIcon)
     Vue.component('UserIcon', UserIcon)
+    Vue.component('CpuIcon', CpuIcon)
   }
 }

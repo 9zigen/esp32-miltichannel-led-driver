@@ -17,7 +17,6 @@
 #include "nvs_flash.h"
 
 #include "esp_tls.h"
-#include "esp_crt_bundle.h"
 
 #include "include/ota.h"
 #include "../../main/include/connect.h"
@@ -30,7 +29,7 @@ extern const uint8_t server_cert_pem_end[] asm("_binary_fw_alab_cc_pem_end");
 
 esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 {
-  switch(evt->event_id) {
+  switch (evt->event_id) {
     case HTTP_EVENT_ERROR:
       ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
       break;
@@ -52,6 +51,9 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
     case HTTP_EVENT_DISCONNECTED:
       ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
       break;
+    case HTTP_EVENT_REDIRECT:
+      ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
+      break;
   }
   return ESP_OK;
 }
@@ -71,15 +73,16 @@ void ota_task(void *ota_url)
 //  esp_tls_cfg_t cfg = {
 //      .crt_bundle_attach = esp_crt_bundle_attach,
 //  };
-
 //  esp_crt_bundle_attach(NULL);
-
 //  esp_tls_init_global_ca_store();
+
   esp_http_client_config_t config = {
       .url = default_ota_url_ptr,
-//      .cert_pem = (char *)server_cert_pem_start,
+      .timeout_ms = 20000,
+      .keep_alive_enable = true,
       .event_handler = _http_event_handler,
-//      .use_global_ca_store = true
+      //      .cert_pem = (char *)server_cert_pem_start,
+      //      .use_global_ca_store = true
   };
 
   /* ex: http://192.168.1.2:80/firmware.bin */
@@ -87,7 +90,11 @@ void ota_task(void *ota_url)
     config.url = ota_url;
   }
 
-  esp_err_t ret = esp_https_ota(&config);
+  esp_https_ota_config_t ota_config = {
+      .http_config = &config,
+  };
+
+  esp_err_t ret = esp_https_ota(&ota_config);
 
   if (ret == ESP_OK) {
     esp_restart();

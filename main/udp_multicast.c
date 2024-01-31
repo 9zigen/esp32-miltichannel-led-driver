@@ -136,7 +136,7 @@ static int create_multicast_ipv4_socket(void)
 }
 
 /* sync lights */
-void udp_set_light(const double * target_duty, double target_brightness, transition_mode_t mode)
+void udp_set_light(const double * target_duty, double target_brightness)
 {
   x_light_message_t txMessage;
   for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
@@ -147,10 +147,9 @@ void udp_set_light(const double * target_duty, double target_brightness, transit
 
   /* transition duration LEDC_FADE_TIME in ms. */
   txMessage.target_brightness = target_brightness;
-  txMessage.transition_mode = mode;
 
   if (xQueueUDP != 0) {
-    xQueueSendToBack(xQueueUDP, &txMessage, 100/portTICK_RATE_MS);
+    xQueueSendToBack(xQueueUDP, &txMessage, 100/portTICK_PERIOD_MS);
   }
 }
 
@@ -224,38 +223,80 @@ void mcast_udp_task(void *pvParameters)
           recvbuf[len] = 0; // Null-terminate whatever we received and treat like a string...
 
           /* parse json --------------------------- */
-          uint8_t channel_id = 0;
+          /*
+           * {
+           *    sync_channel: [
+           *      {
+           *        sync_channel_group: 0,
+           *        duty: 8192
+           *      },
+           *      {
+           *        sync_channel_group: 1,
+           *        duty: 8192
+           *      }
+           *    ],
+           *    sync_global:
+           *    {
+           *      brightness: 123,
+           *      sync_group: 0
+           *    }
+           * }
+           * */
           double target_duty[MAX_LED_CHANNELS] = {0};
           double target_brightness = 0.0;
-          uint8_t target_mode = 0;
-          cJSON *root = cJSON_Parse(recvbuf);
-          cJSON *channel_item;
-          cJSON *channels = cJSON_GetObjectItem(root, "channels");
-          if (cJSON_IsArray(channels)) {
-            cJSON_ArrayForEach(channel_item, channels) {
-              if (cJSON_IsNumber(channel_item)) {
-                target_duty[channel_id] = channel_item->valuedouble;
-                ESP_LOGD(TAG, "udp rx channel %d new duty %f", channel_id, channel_item->valuedouble);
 
+          cJSON *root = cJSON_Parse(recvbuf);
+          cJSON *sync_channel = cJSON_GetObjectItem(root, "sync_channel");
+          cJSON *sync_global = cJSON_GetObjectItem(root, "sync_global");
+          cJSON *sync_group = cJSON_GetObjectItem(sync_global, "sync_group");
+
+          if (cJSON_IsNumber(sync_group))
+          {
+            schedule_config_t * schedule_config = get_schedule_config();
+            if (schedule_config->use_sync && (schedule_config->sync_group == sync_group->valueint))
+            {
+              /* Set current duty */
+              for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
+              {
+                target_duty[i] = get_channel_duty(i);
               }
-              channel_id++;
+
+              /* Map group to led channel */
+              cJSON *group_item;
+              if (cJSON_IsArray(sync_channel)) {
+                cJSON_ArrayForEach(group_item, sync_channel) {
+                  cJSON *sync_channel_group = cJSON_GetObjectItem(group_item, "sync_channel_group");
+                  cJSON *duty = cJSON_GetObjectItem(group_item, "duty");
+
+                  if (cJSON_IsNumber(sync_channel_group) && cJSON_IsNumber(duty)) {
+                    uint8_t channel_group = sync_channel_group->valueint;
+                    double channel_duty = duty->valuedouble;
+
+                    for (uint8_t i = 0; i < MAX_LED_CHANNELS; ++i)
+                    {
+                      led_t * led_config = get_leds(i);
+                      if (led_config->sync_channel && (led_config->sync_channel_group == channel_group))
+                      {
+                        target_duty[i] = channel_duty;
+                      }
+                    }
+                  }
+                }
+              }
+
+              cJSON *brightness = cJSON_GetObjectItem(sync_global, "brightness");
+              if (cJSON_IsNumber(brightness)) {
+                target_brightness = brightness->valuedouble;
+                ESP_LOGD(TAG, "udp rx new brightness %f", brightness->valuedouble);
+              }
+
+              set_light(target_duty, target_brightness, 1, 1);
             }
           }
-          cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
-          if (cJSON_IsNumber(brightness)) {
-            target_brightness = brightness->valuedouble;
-            ESP_LOGD(TAG, "udp rx new brightness %f", brightness->valuedouble);
-          }
-          cJSON *mode = cJSON_GetObjectItem(root, "mode");
-          if (cJSON_IsNumber(brightness)) {
-            target_mode = mode->valueint;
-            ESP_LOGI(TAG, "udp rx new mode %d", mode->valueint);
-          }
 
-          set_light(target_duty, target_brightness, target_mode, 1);
+
           cJSON_Delete(root);
-
-          ESP_LOGD(TAG, "%s", recvbuf);
+          ESP_LOGD(TAG, "received: %s", recvbuf);
         }
       }
       else { // s == 0
@@ -266,29 +307,68 @@ void mcast_udp_task(void *pvParameters)
           ESP_LOGD(TAG, "new udp queue --------- ");
           ESP_LOGD(TAG, "brightness: %f", rxMessage.target_brightness);
 
-          cJSON * root = cJSON_CreateObject();
-          cJSON * channels = cJSON_CreateArray();
-          for (int i = 0; i < MAX_LED_CHANNELS; ++i) {
-            cJSON_AddItemToArray(channels, cJSON_CreateNumber(rxMessage.target_duty[i]));
-          }
-          cJSON_AddItemToObject(root, "channels", channels);
-          cJSON_AddItemToObject(root, "brightness", cJSON_CreateNumber(rxMessage.target_brightness));
-          cJSON_AddItemToObject(root, "mode", cJSON_CreateNumber(rxMessage.transition_mode));
+          /*
+           * {
+           *    sync_channel: [
+           *      {
+           *        sync_channel_group: 0,
+           *        duty: 8192
+           *      },
+           *      {
+           *        sync_channel_group: 1,
+           *        duty: 8192
+           *      }
+           *    ],
+           *    sync_global:
+           *    {
+           *      brightness: 123,
+           *      sync_group: 0
+           *    }
+           * }
+           * */
 
-          char * string = cJSON_Print(root);
-          cJSON_Delete(root);
+          schedule_config_t * schedule_config = get_schedule_config();
 
-          char sendbuf[1024];
-          char addrbuf[32] = { 0 };
-          int len = snprintf(sendbuf, sizeof(sendbuf), "%s", string);
-          if (len > sizeof(sendbuf)) {
-            ESP_LOGE(TAG, "Overflowed multicast sendfmt buffer!!");
-            err = -1;
-            break;
-          }
-          free(string);
+          if (schedule_config->use_sync && schedule_config->sync_master) {
+            cJSON * root = cJSON_CreateObject();
+            cJSON * sync_channel = cJSON_CreateArray();
 
-          // Timeout passed with no incoming data, so send something!
+            for (int i = 0; i < MAX_LED_CHANNELS; ++i)
+            {
+              led_t * led_config = get_leds(i);
+
+              if (led_config->sync_channel)
+              {
+                cJSON * sync_channel_item = cJSON_CreateObject();
+                cJSON_AddItemToObject(sync_channel_item, "sync_channel_group", cJSON_CreateNumber(led_config->sync_channel_group));
+                cJSON_AddItemToObject(sync_channel_item, "duty", cJSON_CreateNumber(rxMessage.target_duty[i]));
+                cJSON_AddItemToArray(sync_channel, sync_channel_item);
+              }
+            }
+            cJSON_AddItemToObject(root, "sync_channel", sync_channel);
+
+            cJSON * sync_global = cJSON_CreateObject();
+            cJSON_AddItemToObject(sync_global, "brightness", cJSON_CreateNumber(rxMessage.target_brightness));
+            cJSON_AddItemToObject(sync_global, "sync_group", cJSON_CreateNumber(schedule_config->sync_group));
+            cJSON_AddItemToObject(root, "sync_global", sync_global);
+
+            char * string = cJSON_Print(root);
+            cJSON_Delete(root);
+
+            char sendbuf[1024];
+            char addrbuf[32] = { 0 };
+            int len = snprintf(sendbuf, sizeof(sendbuf), "%s", string);
+            if (len > sizeof(sendbuf)) {
+              ESP_LOGE(TAG, "Overflowed multicast sendfmt buffer!!");
+              err = -1;
+              break;
+            }
+            free(string);
+
+            ESP_LOGD(TAG, "for send: %s", sendbuf);
+
+
+            // Timeout passed with no incoming data, so send something!
 //          static int send_count;
 //          const char sendfmt[] = "Multicast #%d sent by ESP32\n";
 //          char sendbuf[48];
@@ -301,36 +381,37 @@ void mcast_udp_task(void *pvParameters)
 //            break;
 //          }
 
-          struct addrinfo hints = {
-              .ai_flags = AI_PASSIVE,
-              .ai_socktype = SOCK_DGRAM,
-          };
+            struct addrinfo hints = {
+                .ai_flags = AI_PASSIVE,
+                .ai_socktype = SOCK_DGRAM,
+            };
 
-          struct addrinfo *res;
+            struct addrinfo *res;
 
-          hints.ai_family = AF_INET; // For an IPv4 socket
-          int err = getaddrinfo(MULTICAST_IPV4_ADDR,
-                                NULL,
-                                &hints,
-                                &res);
-          if (err < 0) {
-            ESP_LOGE(TAG, "getaddrinfo() failed for IPV4 destination address. error: %d", err);
-            break;
-          }
-          if (res == 0) {
-            ESP_LOGE(TAG, "getaddrinfo() did not return any addresses");
-            break;
-          }
+            hints.ai_family = AF_INET; // For an IPv4 socket
+            int err = getaddrinfo(MULTICAST_IPV4_ADDR,
+                                  NULL,
+                                  &hints,
+                                  &res);
+            if (err < 0) {
+              ESP_LOGE(TAG, "getaddrinfo() failed for IPV4 destination address. error: %d", err);
+              break;
+            }
+            if (res == 0) {
+              ESP_LOGE(TAG, "getaddrinfo() did not return any addresses");
+              break;
+            }
 
-          ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(UDP_PORT);
-          inet_ntoa_r(((struct sockaddr_in *)res->ai_addr)->sin_addr, addrbuf, sizeof(addrbuf)-1);
-          ESP_LOGI(TAG, "Sending to IPV4 multicast address %s:%d...",  addrbuf, UDP_PORT);
+            ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(UDP_PORT);
+            inet_ntoa_r(((struct sockaddr_in *)res->ai_addr)->sin_addr, addrbuf, sizeof(addrbuf)-1);
+            ESP_LOGI(TAG, "Sending to IPV4 multicast address %s:%d...",  addrbuf, UDP_PORT);
 
-          err = sendto(sock, sendbuf, len, 0, res->ai_addr, res->ai_addrlen);
-          freeaddrinfo(res);
-          if (err < 0) {
-            ESP_LOGE(TAG, "IPV4 sendto failed. errno: %d", errno);
-            break;
+            err = sendto(sock, sendbuf, len, 0, res->ai_addr, res->ai_addrlen);
+            freeaddrinfo(res);
+            if (err < 0) {
+              ESP_LOGE(TAG, "IPV4 sendto failed. errno: %d", errno);
+              break;
+            }
           }
         }
       }

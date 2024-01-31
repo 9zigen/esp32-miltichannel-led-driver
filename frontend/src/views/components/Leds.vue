@@ -105,6 +105,38 @@
             </div>
           </div>
 
+          <!-- Sync -->
+          <div class="field is-horizontal">
+            <div class="field-label is-normal">
+              <label class="label">Sync Group</label>
+            </div>
+            <div class="field-body">
+              <div class="field is-narrow">
+                <div class="control">
+                  <toggle-switch
+                    v-model.number="led.sync_channel"
+                    round
+                  />
+                </div>
+              </div>
+              <div v-show="led.sync_channel" class="field has-addons is-narrow">
+                <div class="control">
+                  <input
+                    v-model.number="led.sync_channel_group"
+                    class="input"
+                    type="number"
+                    placeholder="sync group"
+                  >
+                </div>
+                <p class="control">
+                  <a class="button is-static">
+                    0-255
+                  </a>
+                </p>
+              </div>
+            </div>
+          </div>
+
           <div>
             <a
               v-show="!mqtt_info[index]"

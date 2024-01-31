@@ -7,12 +7,15 @@
 #include "freertos/event_groups.h"
 #include "freertos/xtensa_rtos.h"
 
+#include "time.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_system.h"
 
 #include "board.h"
+#include "tools.h"
 #include "pwm.h"
 #include "adc.h"
 #include "rtc.h"
@@ -23,16 +26,11 @@
 
 static const char *TAG="MONITOR";
 system_status_t system_status;
-
-static void init_system_status()
-{
-  system_status.mcu_temp = 0;
-  system_status.free_heap = 0;
-}
+TimerHandle_t xMonitorTimer;
 
 static void update_system_info()
 {
-  /* WiFi info */
+  /* Wi-Fi info */
   wifi_mode_t mode;
   ESP_ERROR_CHECK(esp_wifi_get_mode(&mode));
   if (mode == WIFI_MODE_STA)
@@ -46,26 +44,26 @@ static void update_system_info()
   uint8_t mac[6];
 
   /* IP info */
-  tcpip_adapter_ip_info_t ip;
-  tcpip_adapter_dns_info_t dns;
-  memset(&ip, 0, sizeof(tcpip_adapter_ip_info_t));
-  memset(&dns, 0, sizeof(tcpip_adapter_dns_info_t));
+  esp_netif_ip_info_t ip;
+  esp_netif_dns_info_t dns;
+  memset(&ip, 0, sizeof(esp_netif_ip_info_t));
+  memset(&dns, 0, sizeof(esp_netif_dns_info_t));
 
-  if (tcpip_adapter_get_ip_info(ESP_IF_WIFI_STA, &ip) == ESP_OK)
+  if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip) == ESP_OK)
   {
     snprintf(system_status.net_address, 16, IPSTR, IP2STR(&ip.ip));
     snprintf(system_status.net_mask, 16, IPSTR, IP2STR(&ip.netmask));
     snprintf(system_status.net_gateway, 16, IPSTR, IP2STR(&ip.gw));
     snprintf(system_status.net_gateway, 16, IPSTR, IP2STR(&ip.gw));
-    esp_wifi_get_mac(ESP_IF_WIFI_STA, (uint8_t*)&mac);
+    esp_wifi_get_mac(WIFI_IF_STA, (uint8_t*)&mac);
     snprintf(system_status.mac, 18, MACSTR, MAC2STR(mac));
   }
-  else if (tcpip_adapter_get_ip_info(ESP_IF_WIFI_AP, &ip) == ESP_OK)
+  else if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_AP_DEF"), &ip) == ESP_OK)
   {
     snprintf(system_status.net_address, 16, IPSTR, IP2STR(&ip.ip));
     snprintf(system_status.net_mask, 16, IPSTR, IP2STR(&ip.netmask));
     snprintf(system_status.net_gateway, 16, IPSTR, IP2STR(&ip.gw));
-    esp_wifi_get_mac(ESP_IF_WIFI_AP, (uint8_t*)&mac);
+    esp_wifi_get_mac(WIFI_IF_AP, (uint8_t*)&mac);
     snprintf(system_status.mac, 18, MACSTR, MAC2STR(mac));
   }
 
@@ -83,19 +81,19 @@ static void update_system_info()
   /* Local time */
 //  print_time();
 
+  /* Free heap */
+  system_status.free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+
   /* ADC: NTC + VCC */
   ESP_LOGD(TAG, "ntc temp   : %d", read_ntc_temperature());
   ESP_LOGD(TAG, "mcu temp   : %.2f", system_status.mcu_temp);
   ESP_LOGD(TAG, "power in   : %.2f", read_vcc_voltage());
-#ifdef USE_FAN_PWM
-  ESP_LOGD(TAG, "fan pwm    : %u", ledc_fan_get());
-  ESP_LOGD(TAG, "fan spd    : %u", get_fan_rpm());
-#endif
-
-  /* Free heap */
-  system_status.free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-//  ESP_LOGD(TAG, "free heap  : %u", system_status.free_heap);
   ESP_LOGI(TAG, "free heap  : %u", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+
+#ifdef USE_FAN_PWM
+  ESP_LOGD(TAG, "fan pwm    : %lu", ledc_fan_get());
+  ESP_LOGD(TAG, "fan spd    : %lu", get_fan_rpm());
+#endif
 
   /* overheat protection
      * ToDo web ui configuration for step and max temperature */
@@ -111,18 +109,17 @@ system_status_t* get_system_status(void)
   return &system_status;
 }
 
-void task_monitor(void *pvParameters)
+static void vMonitorTimerCallback(TimerHandle_t xTimer )
 {
-  esp_chip_info_t chip_info;
-  esp_chip_info(&chip_info);
+  update_system_info();
+}
 
-  init_system_status();
+int init_monitor()
+{
+  update_system_info();
+  /* Create pump auto stop timer with 100ms. period */
+  xMonitorTimer = xTimerCreate("xRunTimer", 30 * 1000 / portTICK_PERIOD_MS, pdTRUE, NULL, vMonitorTimerCallback);
+  CHECK_TIMER(xTimerStart(xMonitorTimer, 100 / portTICK_PERIOD_MS));
 
-  while (1) {
-    /* update wifi, network address, mem status */
-    update_system_info();
-
-    //xTaskCreate(&task_i2cscanner, "i2cScanner", 1024, NULL, 5, NULL);
-    vTaskDelay(30 * 1000/portTICK_RATE_MS);
-  }
+  return ESP_OK;
 }

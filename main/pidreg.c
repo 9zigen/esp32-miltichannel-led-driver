@@ -11,7 +11,7 @@
 #include "esp_system.h"
 
 #include "board.h"
-#include "settings.h"
+#include "app_settings.h"
 #include "pwm.h"
 #include "adc.h"
 #include "monitor.h"
@@ -78,8 +78,8 @@ void task_pid_calc(void *pvParameters)
 
   /* check fan */
   ledc_fan_set(2047);
-  vTaskDelay(3000/portTICK_RATE_MS);
-  ESP_LOGE(TAG, "Fan speed %d", get_fan_rpm());
+  vTaskDelay(3000/portTICK_PERIOD_MS);
+  ESP_LOGE(TAG, "Fan speed %lu", get_fan_rpm());
   ledc_fan_set(0);
 
   while (1) {
@@ -95,7 +95,7 @@ void task_pid_calc(void *pvParameters)
     } else {
       ledc_fan_set(0);
     }
-    vTaskDelay(1000 / portTICK_RATE_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 #else
     double temp = read_ntc_temperature();
 
@@ -106,25 +106,24 @@ void task_pid_calc(void *pvParameters)
 
     double out = calculate(&pid, (double)cooling->target_temp, temp);
 
-    if ((xTaskGetTickCount() - xLastAdjTime) > (5000/portTICK_RATE_MS)) {
+    if ((xTaskGetTickCount() - xLastAdjTime) > (5000/portTICK_PERIOD_MS)) {
       xLastAdjTime = xTaskGetTickCount();
-
+      double duty = 0;
       if (light_is_on())
       {
         if (temp >= cooling->start_temp && temp < cooling->max_temp) {
-          double duty = fabs(out) * 2047.0 / temp_delta;
-          ledc_fan_set((uint32_t)duty);
+          duty = fabs(out) * 2047.0 / temp_delta;
         } else if (temp >= cooling->max_temp) {
-          ledc_fan_set(2047);
+          duty = 2047;
         } else if (temp < cooling->start_temp) {
-          ledc_fan_set(0);
+          duty = 0;
         }
-      } else {
-        ledc_fan_set(0);
       }
+      ESP_LOGD(TAG, "%lu", (uint32_t)duty);
+      ledc_fan_set((uint32_t)duty);
     }
 
-    vTaskDelay(250 / portTICK_RATE_MS);
+    vTaskDelay(250 / portTICK_PERIOD_MS);
 #endif
   }
 }

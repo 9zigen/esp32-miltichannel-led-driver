@@ -51,9 +51,9 @@ void task_led(void *pvParameters)
     }
     if ((blink_loop & 0x07) == 7) {
       /* pause */
-      vTaskDelay(5000 / portTICK_RATE_MS);
+      vTaskDelay(5000 / portTICK_PERIOD_MS);
     }
     blink_loop++;
-    vTaskDelay(125 / portTICK_RATE_MS);
+    vTaskDelay(125 / portTICK_PERIOD_MS);
   }
 }

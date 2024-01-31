@@ -1,0 +1,8 @@
+
+menu "Captive DNS redirect"
+
+config CAPTIVE_REDIRECT_IP
+    string "Redirect IP Address"
+	default "192.168.4.1"
+
+endmenu

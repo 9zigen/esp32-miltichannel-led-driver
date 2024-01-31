@@ -24,13 +24,14 @@
 
     <!-- Chart -->
     <div
-      v-if="schedule.length > 1"
+      v-if="series.length > 1"
       class="columns is-centered is-marginless"
     >
       <div class="column">
         <div class="box">
           <vue-chart
             id="schedule-chart"
+            ref="scheduleChart"
             type="line"
             v-bind:labels="labels"
             v-bind:colors="colors"
@@ -216,7 +217,7 @@
                 <div class="field">
                   <div class="control">
                     <a
-                      class="button is-ghost is-hidden-mobile"
+                      class="button is-link is-hidden-mobile"
                       @click="runDemo"
                     ><play-icon /> {{ run_demo_label }}</a>
                   </div>
@@ -311,46 +312,43 @@
                     <!-- Delete Mobile -->
                     <div class="column is-12 is-hidden-tablet">
                       <div class="field has-addons has-addons-centered">
-                        <p class="control">
+                        <div class="control">
                           <span
                             class="button is-light"
                             @click="copyTimePoint(index)"
-                          ><copy-icon /> Copy</span>
-                        </p>
-                        <p class="control">
+                          ><copy-icon class="mr-2"/> Copy</span>
+                        </div>
+                        <div class="control">
                           <span
                             class="button is-primary"
                             @click="applyTimePoint(index)"
-                          ><check-icon /> Now</span>
-                        </p>
-                        <p class="control">
+                          ><check-icon class="mr-2"/>Now</span>
+                        </div>
+                        <div class="control">
                           <span
                             class="button is-danger"
                             @click="deleteTimePoint(index)"
-                          ><x-icon /> Delete</span>
-                        </p>
+                          ><x-icon class="mr-2"/> Delete</span>
+                        </div>
                       </div>
                     </div>
 
                     <!-- Actions Desktop -->
                     <div class="column is-1 is-hidden-mobile is-multiline">
                       <div class="field">
-                        <p class="control has-text-centered">
-                          <label>Copy</label>
+                        <div class="control has-text-centered">
                           <span
                             class="button is-light"
                             @click="copyTimePoint(index)"
                           ><copy-icon /></span>
-                        </p>
-                        <div class="control has-text-centered">
-                          <label>Now</label>
+                        </div>
+                        <div class="control has-text-centered mt-2">
                           <span
                             class="button is-primary"
                             @click="applyTimePoint(index)"
                           ><check-icon /></span>
                         </div>
-                        <div class="control has-text-centered">
-                          <label>Delete</label>
+                        <div class="control has-text-centered mt-2">
                           <span
                             class="button is-danger"
                             @click="deleteTimePoint(index)"
@@ -520,8 +518,8 @@ export default {
         /* sunrise point */
         _schedule.push({
           enabled: true,
-          time_hour: fromMinutes(sunrise + 30).hour,
-          time_minute: fromMinutes(sunrise + 30).minute,
+          time_hour: fromMinutes(sunrise + this.scheduleConfig.simple_mode_duration).hour,
+          time_minute: fromMinutes(sunrise + this.scheduleConfig.simple_mode_duration).minute,
           brightness: this.scheduleConfig.brightness,
           duty: [...this.scheduleConfig.duty]
         })
@@ -538,11 +536,13 @@ export default {
         /* sunset */
         _schedule.push({
           enabled: true,
-          time_hour: fromMinutes(sunset + 30).hour,
-          time_minute: fromMinutes(sunset + 30).minute,
+          time_hour: fromMinutes(sunset + this.scheduleConfig.simple_mode_duration).hour,
+          time_minute: fromMinutes(sunset + this.scheduleConfig.simple_mode_duration).minute,
           brightness: 0,
           duty: [...duty]
         })
+
+        this.schedule = JSON.parse(JSON.stringify(_schedule))
 
         const _labels = _schedule.map(v => this.timeToString(v.time_hour, v.time_minute))
         const _series = this.leds.filter(led => led.state === 1).map((value, index) => ({
@@ -552,6 +552,10 @@ export default {
 
         this.labels = _labels
         this.series = _series
+
+        setTimeout(() => {
+          this.$refs.scheduleChart.update()
+        }, 200)
       } else if (this.schedule.length > 0) {
         const _labels = this.schedule.map(v => this.timeToString(v.time_hour, v.time_minute))
         const _series = this.leds.filter(led => led.state === 1).map((value, index) => ({
@@ -561,6 +565,10 @@ export default {
 
         this.labels = _labels
         this.series = _series
+
+        setTimeout(() => {
+          this.$refs.scheduleChart.update()
+        }, 200)
       } else {
         this.series = []
       }
@@ -597,11 +605,12 @@ export default {
       if (this.schedule.length < this.capacity) {
         /* use default duty from settings */
         const duty = this.leds.map((value) => 0)
+        const lastSchedule = this.schedule[this.schedule.length - 1]
 
         this.schedule.push({
           enabled: true,
-          time_hour: 0,
-          time_minute: 0,
+          time_hour: this.schedule.length ? lastSchedule.time_hour : 0,
+          time_minute: this.schedule.length ? lastSchedule.time_minute + 30 : 1,
           brightness: 100,
           duty: [...duty]
         })
@@ -618,6 +627,11 @@ export default {
     copyTimePoint (id) {
       if (this.schedule.length < this.capacity) {
         let copySchedule = JSON.parse(JSON.stringify(this.schedule[id]))
+        const sourceSchedule = this.schedule[id]
+
+        copySchedule.time_hour = sourceSchedule.time_hour
+        copySchedule.time_minute = sourceSchedule.time_minute + 30
+
         this.schedule.splice(id, 0, copySchedule)
         this.updateSeries()
       } else {
@@ -659,6 +673,7 @@ export default {
         let response
         if (this.scheduleConfig.mode === 0) {
           response = await http.post('/api/settings', { schedule_config: this.scheduleConfig })
+          response = await http.post('/api/schedule', { schedule: this.schedule })
         } else {
           response = await http.post('/api/schedule', { schedule: this.schedule })
         }

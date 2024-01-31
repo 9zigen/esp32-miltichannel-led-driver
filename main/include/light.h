@@ -1,3 +1,4 @@
+#include <sys/cdefs.h>
 /***
 ** Created by Aleksey Volkov on 22.12.2019.
 ***/
@@ -7,12 +8,7 @@
 
 #include <esp_system.h>
 #include "board.h"
-#include "settings.h"
-
-typedef enum {
-  FAST = 0,
-  SLOW = 1
-} transition_mode_t;
+#include "app_settings.h"
 
 typedef enum {
   GAMMA_1_00 = 100,
@@ -38,22 +34,24 @@ typedef struct {
 typedef struct {
   double target_duty[MAX_LED_CHANNELS];
   double target_brightness;
-  transition_mode_t transition_mode;
   uint32_t fade_time;
   uint8_t not_sync;
 } x_light_message_t;
 
 /* public */
 uint8_t get_brightness();
+uint8_t get_light_state();
 uint8_t get_channel_duty(uint8_t id);
 uint8_t get_channel_state(uint8_t id);
 void set_brightness(uint8_t target_brightness, uint8_t not_sync);
 void set_channel_duty(uint8_t id, uint8_t duty, uint8_t not_sync);
 void set_channel_state(uint8_t id, uint8_t state);
-void set_light(const double *target_duty, double target_brightness, uint8_t mode, uint8_t not_sync);
+void set_light(const double *target_duty, double target_brightness, uint8_t stop_schedule, uint8_t not_sync);
 uint8_t light_is_on();
+bool get_schedule_status();
+void set_schedule_status(uint8_t on);
 
-void task_light(void *pvParameter);
+_Noreturn void task_light(void *pvParameter);
 void task_light_transition(void *pvParameter);
 
 #endif //HV_CC_LED_DRIVER_RTOS_LIGHT_H

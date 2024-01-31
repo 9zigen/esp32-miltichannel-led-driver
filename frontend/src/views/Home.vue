@@ -18,7 +18,7 @@
           <!-- left col -->
           <div class="tile is-vertical">
             <!-- Schedule chart -->
-            <div class="tile is-parent">
+            <div class="tile is-vertical is-parent">
               <article class="tile is-child box">
                 <div class="content">
                   <p class="subtitle is-4">
@@ -28,6 +28,18 @@
                     <schedule-chart />
                   </div>
                 </div>
+              </article>
+
+              <article class="tile is-child">
+                <article class="m-t-12">
+                  <div class="buttons has-addons">
+                    <span class="button is-light">{{ scheduleStatus }}</span>
+                    <span
+                      class="button"
+                      @click="toggleSchedule()"
+                    ><component v-bind:is="scheduleActionIcon()" /></span>
+                  </div>
+                </article>
               </article>
             </div>
           </div>
@@ -92,7 +104,7 @@
                     v-show="active[index]"
                     v-bind:key="index"
                     v-bind:style="{borderColor: sliderColor(index)}"
-                    class="tag"
+                    class="tag channel-power"
                   >
                     {{ ledPower(index) }}
                   </span>
@@ -117,7 +129,9 @@
                 <div class="columns">
                   <div class="column has-text-left">
                     <ul>
-                      <li>Firmware: {{ status.firmware }}</li>
+                      <li>Firmware: {{ status.app }}</li>
+                      <li>Build: {{ status.app_version }} {{ status.app_date }}</li>
+                      <li>SDK: {{ status.sdk }}</li>
                       <li>Hardware: {{ status.hardware }}</li>
                       <li>Free Heap: {{ status.freeHeap }}</li>
                       <li>WIFI: {{ status.wifiMode }}</li>
@@ -129,7 +143,7 @@
                     <ul>
                       <li>Time: {{ status.localTime }}</li>
                       <li>Uptime: {{ status.upTime }}</li>
-                      <li>Power IN: {{ status.vcc / 1000 }} volt.</li>
+                      <li>Power IN: {{ parseFloat(status.vcc / 1000).toFixed(2) }} volt.</li>
                       <li>NTC Temperature: {{ status.ntc_temperature }} °C</li>
                       <li>Board Temperature: {{ status.board_temperature / 100 }} °C</li>
                       <li>MQTT Server: {{ mqttStatus }}</li>
@@ -183,7 +197,6 @@
 
 import { eventBus } from '../eventBus'
 import { http } from '../http'
-
 export default {
   name: 'Home',
   data () {
@@ -203,6 +216,7 @@ export default {
         channels: [0, 0, 0, 0, 0, 0, 0, 0],
         brightness: 0,
         firmware: '',
+        schedule_status: false,
         hardware: ''
       },
       colors: [],
@@ -222,6 +236,9 @@ export default {
       let status = this.status.ntpService.enabled ? 'on' : 'off'
       status += this.status.ntpService.sync ? ', sync' : ', not sync'
       return status
+    },
+    scheduleStatus: function () {
+      return this.status.schedule_status ? 'schedule is running' : 'schedule stopped'
     }
   },
   mounted () {
@@ -232,7 +249,7 @@ export default {
       eventBus.$emit('loading', true)
       try {
         /* Device status */
-        let statusResponse = await http.get('/status')
+        let statusResponse = await http.get('/api/status')
         this.status = statusResponse.data.status
 
         /* Leds config */
@@ -354,6 +371,23 @@ export default {
         }
       }
     },
+    async toggleSchedule () {
+      try {
+        const newStatus = !this.status.schedule_status
+        let response = await http.post('/api/schedule/status', { status: newStatus })
+        // eslint-disable-next-line camelcase
+        if (response.data.success) { this.status.schedule_status = !!newStatus }
+      } catch (e) {
+        if (e.response) {
+          eventBus.$emit('message', e.response.data.message, 'danger')
+        } else {
+          eventBus.$emit('message', 'unexpected error', 'danger')
+        }
+      }
+    },
+    scheduleActionIcon () {
+      return this.status.schedule_status ? 'pause-icon' : 'play-icon'
+    },
     sliderColor (index) {
       return this.colors[index]
     }
@@ -362,7 +396,7 @@ export default {
 </script>
 
 <style lang="scss">
-.tag {
+.tag.channel-power {
   border: dashed 1px;
   border-bottom: solid 0.25em;
   box-sizing: border-box;
