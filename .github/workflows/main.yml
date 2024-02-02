@@ -1,0 +1,44 @@
+name: Serverless CICD
+on:
+  push:
+    branches:
+      - '*'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get latest release version number
+        id: get_version
+        uses: battila7/get-version-action@v2
+        
+      - name: generate secret
+        id: generate-secret
+        shell: bash
+        run: |
+          mkdir -p certs
+          pwd
+          openssl s_client -showcerts -connect fw.alab.cc:443 </dev/null 2>/dev/null|openssl x509 -outform PEM > certs/fw_alab_cc.pem
+          ls -la certs
+      - name: check secret
+        id: check-secret
+        shell: bash
+        run: |
+          pwd
+          ls -la certs
+          chmod -R a+rwx certs
+          ls -la certs
+      - name: Install ESP-IDF and Build project
+        uses: rmshub/esp-idf-action@v5
+        with:
+          esp_idf_version: v5.1.2
+          esp_idf_target: esp32
+
+      - name: recheck secret
+        id: recheck-secret
+        shell: bash
+        run: |
+          pwd
+          ls -la certs
+          find . -iname 'fw_alab_cc.pem' -ls
